@@ -10,9 +10,14 @@
 #include <time.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <string.h>
+#include <errno.h>
+
+static G_STATUS LOG_InitLogLock(void);
+static G_STATUS LOG_InitLogFile(const char *LogPath);
 
 FILE *g_LogFileTbl[LOG_LEVEL_MAX];
-pthread_mutex_t g_LogLock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t g_LogLockTbl[LOG_LEVEL_MAX];
 
 /*
  *  @Briefs: Display info to LOG_SYSLOG_FILE
@@ -49,6 +54,104 @@ G_STATUS LOG_SysLog(char *pFormat, ...)
 }
 
 G_STATUS LOG_InitLog(const char *LogPath)
+{
+    if(STAT_OK != LOG_InitLogLock())
+        return STAT_ERR;
+        
+    if(STAT_OK != LOG_InitLogFile(LogPath))
+        return STAT_ERR;
+    
+    if(STAT_OK != LOG_CheckLogFileSize())
+        return STAT_ERR;
+    
+    return STAT_OK;
+}
+
+G_STATUS LOG_CloseLog(void)
+{
+    int i;
+
+    for(i = 0; i < LOG_LEVEL_MAX; i++)
+    {
+        if(NULL != g_LogFileTbl[i])
+        {
+            fclose(g_LogFileTbl[i]);
+            g_LogFileTbl[i] = NULL;
+        }
+    }
+
+    return STAT_OK;
+}
+
+G_STATUS LOG_DispLogTime(FILE *fp)
+{
+    struct tm *TimeInfo;
+    time_t ti;
+    
+    ti = time(NULL);
+    TimeInfo = localtime(&ti);
+    fprintf(fp, "[%4d-%02d-%02d %02d:%02d:%02d] ", TimeInfo->tm_year+1900, TimeInfo->tm_mon, 
+        TimeInfo->tm_mday, TimeInfo->tm_hour, TimeInfo->tm_min, TimeInfo->tm_sec);
+        
+    return STAT_OK;
+}
+
+G_STATUS LOG_CheckLogFileSize(void)
+{
+    int i;
+    int FileSize;
+    int retry;
+    int fd;
+    
+    for(i = 0; i < LOG_LEVEL_MAX; i++)
+    {
+        pthread_mutex_lock(&g_LogLockTbl[i]);
+        
+        FileSize = ftell(g_LogFileTbl[i]);
+        if(LOG_FILE_MAX_SIZE > FileSize)
+        {
+            pthread_mutex_unlock(&g_LogLockTbl[i]);
+            continue;
+        }
+        
+        fd = fileno(g_LogFileTbl[i]);
+        for(retry = 1; retry <= 3; retry++)
+        {
+            if(0 == ftruncate(fd, 0))
+                break;
+        }
+
+        if(3 == retry)
+        {
+            pthread_mutex_unlock(&g_LogLockTbl[i]);
+            return STAT_FATAL_ERR;
+        }
+
+        lseek(fd, 0, SEEK_SET);
+        
+        pthread_mutex_unlock(&g_LogLockTbl[i]);
+    }
+        
+    return STAT_OK;
+}
+
+static G_STATUS LOG_InitLogLock(void)
+{
+    int i;
+
+    for(i = 0; i < LOG_LEVEL_MAX; i++)
+    {
+        if(0 != pthread_mutex_init(&g_LogLockTbl[i], NULL))
+        {
+            LOG_SysLog("[LOG init lock] pthread_mutex_init(): %s\n", strerror(errno));
+            return STAT_ERR;
+        }
+    }
+    
+    return STAT_OK;
+}
+
+static G_STATUS LOG_InitLogFile(const char *LogPath)
 {
     if(0 != access(LogPath, F_OK))
     {
@@ -123,70 +226,23 @@ G_STATUS LOG_InitLog(const char *LogPath)
     //setvbuf(fp, NULL, _IONBF, 0);
     g_LogFileTbl[LOG_LEVEL_FATAL_ERROR] = fp;
 
-    if(STAT_OK != LOG_CheckLogFileSize())
+#ifdef __DEBUG
+    snprintf(buf, sizeof(buf), "%s/debug.log", LogPath);
+    if(STAT_OK != CreateFile(buf, 0600))
+    {
+        LOG_SysLog("Fail to create or open log file: %s\n", buf);
         return STAT_ERR;
-    
-    return STAT_OK;
-}
-
-G_STATUS LOG_CloseLog(void)
-{
-    int i;
-
-    for(i = 0; i < LOG_LEVEL_MAX; i++)
-    {
-        if(NULL != g_LogFileTbl[i])
-        {
-            fclose(g_LogFileTbl[i]);
-            g_LogFileTbl[i] = NULL;
-        }
     }
-
-    return STAT_OK;
-}
-
-G_STATUS LOG_DispLogTime(FILE *fp)
-{
-    struct tm *TimeInfo;
-    time_t ti;
     
-    ti = time(NULL);
-    TimeInfo = localtime(&ti);
-    fprintf(fp, "[%4d-%02d-%02d %02d:%02d:%02d] ", TimeInfo->tm_year+1900, TimeInfo->tm_mon, 
-        TimeInfo->tm_mday, TimeInfo->tm_hour, TimeInfo->tm_min, TimeInfo->tm_sec);
-        
-    return STAT_OK;
-}
-
-G_STATUS LOG_CheckLogFileSize(void)
-{
-    int i;
-    int FileSize;
-    int retry;
-    int fd;
-    
-    pthread_mutex_lock(&g_LogLock);
-    
-    for(i = 0; i < LOG_LEVEL_MAX; i++)
+    fp = fopen(buf, "a+");
+    if(NULL == fp)
     {
-        FileSize = ftell(g_LogFileTbl[i]);
-        if(LOG_FILE_MAX_SIZE > FileSize)
-            continue;
-        
-        fd = fileno(g_LogFileTbl[i]);
-        for(retry = 1; retry <= 3; retry++)
-        {
-            if(0 == ftruncate(fd, 0))
-                break;
-        }
-
-        if(3 == retry)
-            return STAT_FATAL_ERR;
-
-        lseek(fd, 0, SEEK_SET);
+        LOG_SysLog("Fail to create or open log file: %s\n", buf);
+        return STAT_ERR;
     }
-        
-    pthread_mutex_unlock(&g_LogLock);
+    //setvbuf(fp, NULL, _IONBF, 0);
+    g_LogFileTbl[LOG_LEVEL_DEBUG] = fp;
+#endif
 
     return STAT_OK;
 }

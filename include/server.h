@@ -38,12 +38,17 @@ typedef enum {
     USER_STATUS_OFF_LINE,
 }USER_STATUS;
 
-typedef struct UserListStruct {
-    int fd;
+typedef struct UserInfoStruct {
     uint64_t UserID;
     char UserName[USER_NAME_MAX_LENGTH];
-    struct UserListStruct *pNext;
-}UserList_t;
+}UserInfo_t;
+
+typedef struct SessionStruct {
+    int fd;
+    char ip[IP_ADDR_MAX_LENGTH];
+    UserInfo_t UserInfo;
+    struct SessionStruct *pNext;
+}session_t;
 
 extern volatile char g_ServerLiveFlag;
 extern int g_ServerSocketFd;
@@ -51,6 +56,7 @@ extern int g_ServerSocketFd;
 G_STATUS SERVER_CreateTask(pthread_t *pServerTaskID);
 void *SERVER_ServerTask(void *pArg);
 G_STATUS SERVER_ROOT_AddAdmin(MsgPkt_t *pMsgPkt);
+G_STATUS SERVER_ROOT_UserLogin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ROOT_DelAdmin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ADMIN_AddUser(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ADMIN_DelUser(MsgPkt_t *pMsgPkt);

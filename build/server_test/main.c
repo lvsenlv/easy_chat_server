@@ -37,7 +37,7 @@ int main(int argc, char **argv)
     char buf[BUF_SIZE] = {0};
     int SendDataLength;
     MsgPkt_t MsgPkt;
-    CC code;
+    COMPLETION_CODE code;
     int retry;
     
     ClientSocketFd = socket(AF_INET, SOCK_STREAM, 0);
@@ -80,9 +80,13 @@ int main(int argc, char **argv)
         g_ResFd = MsgPkt.fd;
         printf("Server response fd: %d\n", g_ResFd);
         
-        MsgPkt.cmd = MSG_CMD_USER_LOGIN;
-        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_USER_NAME, "admin01", 7);
-        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_PASSWORD, "admin01", 7);
+        MsgPkt.cmd = MSG_CMD_ROOT_LOGIN;
+        MSG_Set64BitData(&MsgPkt, MSG_DATA_OFFSET_USER_ID, 0x1314);
+        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_USER_NAME, "lvsenlv", 7);
+        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_PASSWORD, "linuxroot", 9);
+        //MsgPkt.cmd = MSG_CMD_USER_LOGIN;
+        //MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_USER_NAME, "admin01", 7);
+        //MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_PASSWORD, "admin01", 7);
         
         SendDataLength = write(ClientSocketFd, &MsgPkt, sizeof(MsgPkt_t));
         if(sizeof(MsgPkt_t) != SendDataLength)
@@ -161,7 +165,7 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
     {
         case '1':
             pMsgPkt->cmd = MSG_CMD_ROOT_ADD_ADMIN;
-            pMsgPkt->UserID = 0x1314;
+            MSG_Set64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID, 0x1314);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, "lvsenlv", 7);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, "linuxroot", 9);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_USER_NAME, "admin01", 7);
@@ -169,14 +173,14 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
             break;
         case '2':
             pMsgPkt->cmd = MSG_CMD_ROOT_DEL_ADMIN;
-            pMsgPkt->UserID = 0x1314;
+            MSG_Set64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID, 0x1314);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, "lvsenlv", 7);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, "linuxroot", 9);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_DEL_USER_NAME, "admin01", 7);
             break;
         case '3':
             pMsgPkt->cmd = MSG_CMD_ADMIN_ADD_USER;
-            pMsgPkt->UserID = 0x82808fe164b2a63a;
+            MSG_Set64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID, 0x82809542fc155b0e);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, "admin01", 7);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, "admin01", 7);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_USER_NAME, "user01", 6);
@@ -241,12 +245,15 @@ G_STATUS GetResponse(MsgPkt_t *pMsgPkt, int fd, int timeout)
             }
 
             printf("[Get response] "
-                "Invali data length in msg queque, actual length: %d\n", ReadDataLength);
+                "Invalid data length in msg queque, actual length: %d\n", ReadDataLength);
             return STAT_ERR;
         }
 
+        if(MSG_CMD_DO_NOTHING == pMsgPkt->cmd)
+            continue;
+
         break;
-    }while(0);
+    }while(1);
     
     return STAT_OK;
 }

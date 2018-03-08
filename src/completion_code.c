@@ -16,7 +16,6 @@ void InitErrorCodeTable(void)
     g_CompletionCodeTable[CC_USER_HAS_BEEN_EXIST]       = "User has been exist";
     g_CompletionCodeTable[CC_USER_DOES_NOT_EXIST]       = "User does not exist";
     g_CompletionCodeTable[CC_USER_LIST_IS_FULL]         = "User list is full";
-    g_CompletionCodeTable[CC_FAIL_TO_CREATE_USER_ID]    = "Fail to create user id";
     g_CompletionCodeTable[CC_FAIL_TO_OPEN]              = "Fail to open file";
     g_CompletionCodeTable[CC_FAIL_TO_WRITE]             = "Fail to write to file";
     g_CompletionCodeTable[CC_FAIL_TO_READ]              = "Fail to read from file";

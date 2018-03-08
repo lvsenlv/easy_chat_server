@@ -29,10 +29,8 @@
 #define MSG_DATA_MAX_LENGTH                 1024
 
 //Pay attention to the interval of following offset
-
-#define MSG_DATA_OFFSET_FD                  0
-
-#define MSG_DATA_OFFSET_USER_ID             (MSG_DATA_OFFSET_FD + 32)
+#define MSG_DATA_OFFSET_CC                  0
+#define MSG_DATA_OFFSET_USER_ID             (MSG_DATA_OFFSET_CC + 32)
 #define MSG_DATA_OFFSET_USER_NAME           (MSG_DATA_OFFSET_USER_ID + 64)
 #define MSG_DATA_OFFSET_PASSWORD            (MSG_DATA_OFFSET_USER_NAME + USER_NAME_MAX_LENGTH)
 #define MSG_DATA_OFFSET_ADD_USER_NAME       (MSG_DATA_OFFSET_PASSWORD + PASSWORD_MAX_LENGTH)
@@ -40,10 +38,9 @@
 #define MSG_DATA_OFFSET_ADD_PASSWORD        (MSG_DATA_OFFSET_ADD_USER_NAME + USER_NAME_MAX_LENGTH)
 #define MSG_DATA_OFFSET_DEL_PASSWORD        MSG_DATA_OFFSET_ADD_PASSWORD
 
-#define MSG_DATA_OFFSET_CC                  (MSG_DATA_OFFSET_FD + 32)
-
 typedef enum {
     MSG_CMD_SEND_TO_USER = 1,
+    MSG_CMD_ROOT_LOGIN,
     MSG_CMD_ROOT_ADD_ADMIN,
     MSG_CMD_ROOT_DEL_ADMIN,
     MSG_CMD_ADMIN_ADD_USER,
@@ -56,7 +53,6 @@ typedef enum {
 typedef struct MsgPktStruct {
     MSG_CMD cmd;
     int fd;
-    uint64_t UserID;
     char data[MSG_DATA_MAX_LENGTH];
     char CCFlag; //1 means it need to send a response message
     int CheckSum;

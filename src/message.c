@@ -135,7 +135,6 @@ void MSG_InitMsgPkt(MsgPkt_t *pMsgPkt)
 {
     pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
     pMsgPkt->fd = -1;
-    pMsgPkt->UserID = 0;
     memset(pMsgPkt->data, 0, sizeof(pMsgPkt->data));
     pMsgPkt->CCFlag = 0;
     pMsgPkt->CheckSum = 0;
@@ -200,7 +199,7 @@ G_STATUS MSG_PostMsg(MsgPkt_t *pMsgPkt)
         return STAT_ERR;
     }
 
-    LOG_INFO("[MSG post msg] Succss post msg, cmd: %d\n", pMsgPkt->cmd);
+    LOG_DEBUG("[MSG post msg] Succss post msg, cmd: %d\n", pMsgPkt->cmd);
     
     return STAT_OK;
 }
@@ -323,6 +322,9 @@ static G_STATUS MSG_ProcessMsg(MsgPkt_t *pMsgPkt)
             break;
         case MSG_CMD_ADMIN_ADD_USER:
             SERVER_ADMIN_AddUser(pMsgPkt);
+            break;
+        case MSG_CMD_ROOT_LOGIN:
+            SERVER_ROOT_UserLogin(pMsgPkt);
             break;
         case MSG_CMD_ROOT_ADD_ADMIN:
             SERVER_ROOT_AddAdmin(pMsgPkt);

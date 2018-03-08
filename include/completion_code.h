@@ -16,7 +16,6 @@ typedef enum {
     CC_USER_HAS_BEEN_EXIST,
     CC_USER_DOES_NOT_EXIST,
     CC_USER_LIST_IS_FULL,
-    CC_FAIL_TO_CREATE_USER_ID,
     CC_FAIL_TO_OPEN,
     CC_FAIL_TO_WRITE,
     CC_FAIL_TO_READ,
@@ -26,7 +25,7 @@ typedef enum {
     CC_SESSION_IS_NOT_FOUND,
     
     CC_MAX,
-}CC; //Completion code
+}COMPLETION_CODE;
 
 extern char *g_CompletionCodeTable[CC_MAX];
 
@@ -34,7 +33,7 @@ void InitErrorCodeTable(void);
 
 
 
-static inline char *GetErrorDetails(CC code)
+static inline char *GetErrorDetails(COMPLETION_CODE code)
 {
     if((0 >= code) || (CC_MAX <= code))
         return "Unknown error";
