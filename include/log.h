@@ -9,11 +9,21 @@
 #define __LOG_H
 
 #include "common.h"
+#include <unistd.h>
 
 #define LOG_PATH                            "/var/log/easy_chat"
 #define LOG_SYSLOG_FILE                     "/var/log/easy_chat_syslog"
-#define LOG_MONITOR_TIME_INTERVAL           5 //Unit: second
+#define LOG_MONITOR_TIME_INTERVAL           10 //Unit: second
 #define LOG_FILE_MAX_SIZE                   (1024*10) //10Mb
+
+#define LOG_CheckSize(fp) \
+        do \
+        { \
+            if(LOG_FILE_MAX_SIZE <= ftell(fp)) \
+            { \
+                ftruncate(fileno(fp), 0); \
+            } \
+        }while(0)
 
 #define LOG_INFO(format, args...) \
         do \

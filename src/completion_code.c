@@ -23,4 +23,5 @@ void InitErrorCodeTable(void)
     g_CompletionCodeTable[CC_FAIL_TO_MALLOC]            = "Fail to malloc";
     g_CompletionCodeTable[CC_PASSWORD_IS_TOO_SHORT]     = "Password is to short";
     g_CompletionCodeTable[CC_SESSION_IS_NOT_FOUND]      = "Session is not found";
+    g_CompletionCodeTable[CC_FAIL_TO_CLOSE_SESSION]     = "Fail to close session";
 }

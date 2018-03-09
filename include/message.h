@@ -48,6 +48,7 @@ typedef enum {
     MSG_CMD_USER_LOGOUT,
     MSG_CMD_CHECK_ALL_USER_STATUS,
     MSG_CMD_DO_NOTHING,
+    MSG_CMD_MAX,
 }MSG_CMD;
 
 typedef struct MsgPktStruct {
@@ -59,6 +60,7 @@ typedef struct MsgPktStruct {
 }MsgPkt_t;
 
 extern char g_MsgTaskLiveFlag;
+extern char *g_pCmdDetail[MSG_CMD_MAX];
 
 G_STATUS MSG_CreateTask(pthread_t *pMsgTaskID);
 void *MSG_MessageTask(void *pArg);

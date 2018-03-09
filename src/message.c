@@ -30,6 +30,7 @@ static G_STATUS MSG_SendToUser(MsgPkt_t *pMsgPkt);
 
 int g_MsgQueue;
 char g_MsgTaskLiveFlag;
+char *g_pCmdDetail[MSG_CMD_MAX];
 
 G_STATUS MSG_CreateTask(pthread_t *pMsgTaskID)
 {
@@ -89,8 +90,7 @@ void *MSG_MessageTask(void *pArg)
         res = select(g_MsgQueue+1, &ReadFds, NULL, NULL, &TimeInterval);
         if(0 > res)
         {
-            LOG_WARNING("[MSG msg handle task] "
-                "Select function return negative value\n");
+            LOG_WARNING("[Msg task] Select function return negative value\n");
             continue;
         }
         else if(0 == res)
@@ -102,8 +102,7 @@ void *MSG_MessageTask(void *pArg)
         ReadDataLength = read(g_MsgQueue, &MsgPkt, sizeof(MsgPkt_t));
         if(sizeof(MsgPkt_t) != ReadDataLength)
         {
-            LOG_WARNING("[MSG msg handle task] "
-                "Invalid data length when getting msg queue, actual length: %d\n", ReadDataLength);
+            LOG_WARNING("[Msg task] read(): %s\n", strerror(errno));
             continue;
         }
 
@@ -176,8 +175,7 @@ G_STATUS MSG_PostMsg(MsgPkt_t *pMsgPkt)
 {
     if(STAT_OK != MSG_LockMsgQueue(g_MsgQueue))
     {
-        LOG_ERROR("[MSG post msg] "
-            "Fail to lock msg queue\n");
+        LOG_ERROR("[Post msg] Fail to lock msg queue\n");
         return STAT_ERR;
     }
 
@@ -185,8 +183,7 @@ G_STATUS MSG_PostMsg(MsgPkt_t *pMsgPkt)
     WriteDataLength = write(g_MsgQueue, pMsgPkt, sizeof(MsgPkt_t));
     if(sizeof(MsgPkt_t) != WriteDataLength)
     {
-        LOG_ERROR("[MSG post msg] "
-            "Fail to write to msg queue, actual writing data length: %d\n", WriteDataLength);
+        LOG_ERROR("[Post msg] write(): %s\n", strerror(errno));
     
         MSG_UnlockMsgQueue(g_MsgQueue);
         return STAT_ERR;
@@ -194,12 +191,11 @@ G_STATUS MSG_PostMsg(MsgPkt_t *pMsgPkt)
 
     if(STAT_OK != MSG_UnlockMsgQueue(g_MsgQueue))
     {
-        LOG_ERROR("[MSG post msg] "
-            "Fail to unlock msg queue\n");
+        LOG_ERROR("[Post msg] Fail to unlock msg queue\n");
         return STAT_ERR;
     }
 
-    LOG_DEBUG("[MSG post msg] Succss post msg, cmd: %d\n", pMsgPkt->cmd);
+    LOG_DEBUG("[Post msg] Success, cmd: %s\n", g_pCmdDetail[pMsgPkt->cmd]);
     
     return STAT_OK;
 }
@@ -230,8 +226,7 @@ G_STATUS MSG_GetResponse(MsgPkt_t *pMsgPkt, int timeout)
         res = select(fd+1, &fds, NULL, NULL, &TimeInterval);
         if(0 > res)
         {
-            LOG_ERROR("[MSG get response] "
-                "Select function return a negative value\n");
+            LOG_ERROR("[MSG get response] Select function return a negative value\n");
             break;
         }
 
@@ -244,8 +239,7 @@ G_STATUS MSG_GetResponse(MsgPkt_t *pMsgPkt, int timeout)
         ReadDataLength = read(fd, pMsgPkt, sizeof(MsgPkt_t));
         if(sizeof(MsgPkt_t) != ReadDataLength)
         {
-            LOG_ERROR("[MSG get response] "
-                "Invali data length in msg queque, actual length: %d\n", ReadDataLength);
+            LOG_ERROR("[MSG get response] read(): %s\n", strerror(errno));
             return STAT_ERR;
         }
 
@@ -271,8 +265,7 @@ static G_STATUS MSG_CreateMsgQueue(void)
     {
         if(0 != unlink(MSG_QUEUE_NAME))
         {
-            LOG_FATAL_ERROR("[MSG create queue] "
-                "Fail to delete previous queue: %s", MSG_QUEUE_NAME);
+            LOG_FATAL_ERROR("[MSG create queue] unlink(): %s", strerror(errno));
                 
             return STAT_FATAL_ERR;
         }
@@ -280,16 +273,14 @@ static G_STATUS MSG_CreateMsgQueue(void)
     
     if(0 != mkfifo(MSG_QUEUE_NAME, 0600))
     {
-        LOG_FATAL_ERROR("[MSG create queue] "
-            "Fail to create fifo: %s", MSG_QUEUE_NAME);
+        LOG_FATAL_ERROR("[MSG create queue] mkfifo(): %s", strerror(errno));
         return STAT_FATAL_ERR;
     }
     
     g_MsgQueue = open(MSG_QUEUE_NAME, O_RDWR); //It would be block if not use O_RDWR
     if(0 > g_MsgQueue)
     {
-        LOG_FATAL_ERROR("[MSG create queue] "
-            "Fail to open fifo: %s", MSG_QUEUE_NAME);
+        LOG_FATAL_ERROR("[MSG create queue] open(): %s", strerror(errno));
         return STAT_FATAL_ERR;
     }
     
@@ -299,6 +290,16 @@ static G_STATUS MSG_CreateMsgQueue(void)
 static G_STATUS MSG_InitGlobalVariables(void)
 {
     g_MsgTaskLiveFlag = 0;
+
+    g_pCmdDetail[MSG_CMD_SEND_TO_USER]              = "send to user";
+    g_pCmdDetail[MSG_CMD_ROOT_LOGIN]                = "root login";
+    g_pCmdDetail[MSG_CMD_ROOT_ADD_ADMIN]            = "add admin";
+    g_pCmdDetail[MSG_CMD_ROOT_DEL_ADMIN]            = "del admin";
+    g_pCmdDetail[MSG_CMD_ADMIN_ADD_USER]            = "add user";
+    g_pCmdDetail[MSG_CMD_USER_LOGIN]                = "user login";
+    g_pCmdDetail[MSG_CMD_USER_LOGOUT]               = "user logout";
+    g_pCmdDetail[MSG_CMD_CHECK_ALL_USER_STATUS]     = "check status";
+    g_pCmdDetail[MSG_CMD_DO_NOTHING]                = "do nothing";
     
     return STAT_OK;
 }

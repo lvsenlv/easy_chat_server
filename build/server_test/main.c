@@ -80,13 +80,13 @@ int main(int argc, char **argv)
         g_ResFd = MsgPkt.fd;
         printf("Server response fd: %d\n", g_ResFd);
         
-        MsgPkt.cmd = MSG_CMD_ROOT_LOGIN;
-        MSG_Set64BitData(&MsgPkt, MSG_DATA_OFFSET_USER_ID, 0x1314);
-        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_USER_NAME, "lvsenlv", 7);
-        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_PASSWORD, "linuxroot", 9);
-        //MsgPkt.cmd = MSG_CMD_USER_LOGIN;
-        //MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_USER_NAME, "admin01", 7);
-        //MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_PASSWORD, "admin01", 7);
+//        MsgPkt.cmd = MSG_CMD_ROOT_LOGIN;
+//        MSG_Set64BitData(&MsgPkt, MSG_DATA_OFFSET_USER_ID, 0x1314);
+//        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_USER_NAME, "lvsenlv", 7);
+//        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_PASSWORD, "linuxroot", 9);
+        MsgPkt.cmd = MSG_CMD_USER_LOGIN;
+        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_USER_NAME, "admin01", 7);
+        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_PASSWORD, "admin01", 7);
         
         SendDataLength = write(ClientSocketFd, &MsgPkt, sizeof(MsgPkt_t));
         if(sizeof(MsgPkt_t) != SendDataLength)
@@ -180,14 +180,16 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
             break;
         case '3':
             pMsgPkt->cmd = MSG_CMD_ADMIN_ADD_USER;
-            MSG_Set64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID, 0x82809542fc155b0e);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, "admin01", 7);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, "admin01", 7);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_USER_NAME, "user01", 6);
             MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_PASSWORD, "user01", 6);
             break;
         case 'q':
-            exit(0);
+            pMsgPkt->cmd = MSG_CMD_USER_LOGOUT;
+            MSG_Set64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID, 0x1314);
+            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, "lvsenlv", 7);
+            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, "linuxroot", 9);
             break;
         default:
             return STAT_ERR;

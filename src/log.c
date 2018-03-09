@@ -6,7 +6,6 @@
  ************************************************************************/
 
 #include "log.h"
-#include <unistd.h>
 #include <time.h>
 #include <pthread.h>
 #include <stdarg.h>

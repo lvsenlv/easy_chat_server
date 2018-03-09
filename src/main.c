@@ -21,7 +21,7 @@
 #define DAEMON_LOG_FILE                     "/var/log/easy_chat_daemon"
 #define DAEMON_QUEUE                        "/var/easy_chat_queque"
 #define MONITOR_SERVER_TIME_INTERVAL        5 //Unit: second
-#define PROCESS_KEEP_ALIVE_TIME_INTERVAL    3
+#define PROCESS_KEEP_ALIVE_TIME_INTERVAL    5
 #define PROCESS_HANDSHAKE_SYMBOL            'Y'
 
 FILE *g_DaemonLogFp;
