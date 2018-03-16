@@ -12,11 +12,7 @@
 #include "message.h"
 
 #define SERVER_ROOT_DIR                     "/root/.easy_chat"
-#define SERVER_PASSWORD_DIR                 SERVER_ROOT_DIR"/.password"
-#define SERVER_USER_INFO_DIR                SERVER_ROOT_DIR"/user_info"
-#define SERVER_MESSAGE_DIR                  SERVER_ROOT_DIR"/message"
-#define SERVER_USER_LIST_DIR                SERVER_ROOT_DIR"/user_list"
-#define SERVER_MAX_USER_ID_FILE             SERVER_ROOT_DIR"/max_user_id"
+#define SERVER_IDENTITY_FILE_NAME           "identity.info"
 
 /*
     If the time of twice restarting less than this value,

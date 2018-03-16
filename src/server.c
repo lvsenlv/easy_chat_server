@@ -246,7 +246,7 @@ void *SERVER_ServerTask(void *pArg)
 
 
 
-#define ROOT_LEVEL_FUNC_START //Only use for locating function efficiently
+#define ROOT_LEVEL //Only use for locating function efficiently
 //Root level function
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -255,30 +255,26 @@ void *SERVER_ServerTask(void *pArg)
  *  @Return: STAT_OK / STAT_ERR
  *  @Note:   None
  */
-static G_STATUS SERVER_ROOT_VerifyIdentity(MsgPkt_t *pMsgPkt)
+static G_STATUS SERVER_ROOT_VerifyIdentity(MsgDataVerifyIdentity_t *pVerifyData)
 {
-    uint64_t UserID;
-    char UserName[USER_NAME_MAX_LENGTH];
-    char password[PASSWORD_MAX_LENGTH];
+    pVerifyData->UserName[USER_NAME_MAX_LENGTH-1] = '\0';
+    pVerifyData->password[PASSWORD_MAX_LENGTH-1] = '\0';
     
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, UserName, USER_NAME_MAX_LENGTH);
-    if(0 != strcmp("lvsenlv", UserName))
+    if(0 != strcmp("lvsenlv", pVerifyData->UserName))
     {
-        LOG_WARNING("[Root verify][%s] Invalid root name\n", UserName);
+        LOG_WARNING("[Root verify] Invalid root name: %s\n", pVerifyData->UserName);
         return STAT_ERR;
     }
     
-    UserID = MSG_Get64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID);
-    if(4884 != UserID)
+    if(4884 != pVerifyData->UserID)
     {
-        LOG_WARNING("[Root verify][%s] Invalid user id: 0x%lx\n", UserName, UserID);
+        LOG_WARNING("[Root verify] Invalid user id: 0x%lx\n", pVerifyData->UserID);
         return STAT_ERR;
     }
     
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, password, PASSWORD_MAX_LENGTH);
-    if(0 != strcmp("linuxroot", password))
+    if(0 != strcmp("linuxroot", pVerifyData->password))
     {
-        LOG_WARNING("[Root verify][%s] Password error\n", UserName);
+        LOG_WARNING("[Root verify] Password error\n");
         return STAT_ERR;
     }
 
@@ -292,41 +288,44 @@ static G_STATUS SERVER_ROOT_VerifyIdentity(MsgPkt_t *pMsgPkt)
  */
 G_STATUS SERVER_ROOT_UserLogin(MsgPkt_t *pMsgPkt)
 {
-    MsgPkt_t MsgPkt;
-    int fd;
+    MsgPkt_t ResMsgPkt;
+    MsgDataVerifyIdentity_t *pVerifyData;
+    MsgDataRes_t *pResMsgData;
     session_t *pCurSession;
+
+    pVerifyData = (MsgDataVerifyIdentity_t *)pMsgPkt->data;
+    pResMsgData = (MsgDataRes_t *)&(ResMsgPkt.data);
     
-    MsgPkt.cmd = MSG_CMD_SEND_TO_USER;
-    MsgPkt.fd = pMsgPkt->fd;
-    MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_NORMAL);
+    ResMsgPkt.cmd = MSG_CMD_SEND_RES;
+    ResMsgPkt.fd = pMsgPkt->fd;
+    pResMsgData->CC = CC_NORMAL;
     
-    if(STAT_OK != SERVER_ROOT_VerifyIdentity(pMsgPkt))
+    if(STAT_OK != SERVER_ROOT_VerifyIdentity(pVerifyData))
     {
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_PERMISSION_DENIED);
-        MSG_PostMsg(&MsgPkt);
+        pResMsgData->CC = CC_PERMISSION_DENIED;
+        MSG_PostMsg(&ResMsgPkt);
+        
         return STAT_ERR;
     }
 
-    fd = pMsgPkt->fd;
-    
     pthread_mutex_lock(&g_SessionLock);
-    SERVER_GetSession(NULL, &pCurSession, fd, -1);
+    SERVER_GetSession(NULL, &pCurSession, pMsgPkt->fd, -1);
     if(NULL == pCurSession)
     {
         pthread_mutex_unlock(&g_SessionLock);
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_SESSION_IS_NOT_FOUND);
-        MSG_PostMsg(&MsgPkt);
-
+        pResMsgData->CC = CC_SESSION_IS_NOT_FOUND;
+        MSG_PostMsg(&ResMsgPkt);
         LOG_WARNING("[root] Session is not found\n");
+        
         return STAT_ERR;
     }
     
     pCurSession->UserInfo.UserID = 4884;
     memcpy(pCurSession->UserInfo.UserName, "root", 4);
-    LOG_INFO("[root][%s] Login successfully\n", pCurSession->ip);
     pthread_mutex_unlock(&g_SessionLock);
     
-    MSG_PostMsg(&MsgPkt);
+    MSG_PostMsg(&ResMsgPkt);
+    LOG_INFO("[root] Login\n");
     
     return STAT_OK;    
 }
@@ -338,52 +337,44 @@ G_STATUS SERVER_ROOT_UserLogin(MsgPkt_t *pMsgPkt)
  */
 G_STATUS SERVER_ROOT_AddAdmin(MsgPkt_t *pMsgPkt)
 {
-    MsgPkt_t MsgPkt;
-    char UserName[USER_NAME_MAX_LENGTH];
-    char password[PASSWORD_MAX_LENGTH];
+    MsgPkt_t ResMsgPkt;
+    MsgDataAddUser_t *pReqMsgData;
+    MsgDataRes_t *pResMsgData;
     COMPLETION_CODE code;
 
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_USER_NAME, UserName, sizeof(UserName));
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_PASSWORD, password, PASSWORD_MAX_LENGTH);
+    pReqMsgData = (MsgDataAddUser_t *)pMsgPkt->data;
+    pResMsgData = (MsgDataRes_t *)&ResMsgPkt.data;
 
     if(0 != pMsgPkt->CCFlag)
     {
-        MsgPkt.cmd = MSG_CMD_SEND_TO_USER;
-        MsgPkt.fd = pMsgPkt->fd;
-        MsgPkt.CCFlag = 0;
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_NORMAL);
-        
-        if(0 > pMsgPkt->fd)
-        {
-            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_INVALID_FD);
-            MSG_PostMsg(&MsgPkt);
-            LOG_WARNING("[Add admin][%s] Invalid fd value: %d\n", UserName, pMsgPkt->fd);
-            return STAT_ERR;
-        }
+        ResMsgPkt.cmd = MSG_CMD_SEND_RES;
+        ResMsgPkt.fd = pMsgPkt->fd;
+        pResMsgData->CC = CC_NORMAL;
     }
     
-    if(STAT_OK != SERVER_ROOT_VerifyIdentity(pMsgPkt))
+    if(STAT_OK != SERVER_ROOT_VerifyIdentity(&pReqMsgData->VerifyData))
     {
         if(0 != pMsgPkt->CCFlag)
         {
-            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_PERMISSION_DENIED);
-            MSG_PostMsg(&MsgPkt);
+            pResMsgData->CC = CC_PERMISSION_DENIED;
+            MSG_PostMsg(&ResMsgPkt);
         }
         
         return STAT_ERR;
     }
 
-    code = SERVER_AddUser(UserName, password, TRUE);
-
+    pReqMsgData->AddUserName[USER_NAME_MAX_LENGTH-1] = '\0';
+    pReqMsgData->AddPassword[PASSWORD_MAX_LENGTH-1] = '\0';
+    code = SERVER_AddUser(pReqMsgData->AddUserName, pReqMsgData->AddPassword, TRUE);
     if(0 != pMsgPkt->CCFlag)
     {
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, code);
-        MSG_PostMsg(&MsgPkt);
+        pResMsgData->CC = code;
+        MSG_PostMsg(&ResMsgPkt);
     }
 
     if(CC_NORMAL == code)
     {
-        LOG_INFO("[Add admin][%s] Success\n", UserName);
+        LOG_INFO("[Add admin][%s] Success\n", pReqMsgData->AddUserName);
     }
 
     return STAT_OK;
@@ -396,50 +387,44 @@ G_STATUS SERVER_ROOT_AddAdmin(MsgPkt_t *pMsgPkt)
  */
 G_STATUS SERVER_ROOT_DelAdmin(MsgPkt_t *pMsgPkt)
 {
-    MsgPkt_t MsgPkt;
-    char UserName[USER_NAME_MAX_LENGTH];
+    MsgPkt_t ResMsgPkt;
+    MsgDataDelUser_t *pReqMsgData;
+    MsgDataRes_t *pResMsgData;
     COMPLETION_CODE code;
 
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_DEL_USER_NAME, UserName, USER_NAME_MAX_LENGTH);
+    pReqMsgData = (MsgDataDelUser_t *)pMsgPkt->data;
+    pResMsgData = (MsgDataRes_t *)&ResMsgPkt.data;
 
     if(0 != pMsgPkt->CCFlag)
     {
-        MsgPkt.cmd = MSG_CMD_SEND_TO_USER;
-        MsgPkt.fd = pMsgPkt->fd;
-        MsgPkt.CCFlag = 0;
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_NORMAL);
-        
-        if(0 > pMsgPkt->fd)
-        {
-            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_INVALID_FD);
-            MSG_PostMsg(&MsgPkt);
-            LOG_WARNING("[Del admin][%s] Invalid fd value: %d\n", UserName, pMsgPkt->fd);
-            return STAT_ERR;
-        }
+        ResMsgPkt.cmd = MSG_CMD_SEND_RES;
+        ResMsgPkt.fd = pMsgPkt->fd;
+        pResMsgData->CC = CC_NORMAL;
     }
     
-    if(STAT_OK != SERVER_ROOT_VerifyIdentity(pMsgPkt))
+    if(STAT_OK != SERVER_ROOT_VerifyIdentity(&pReqMsgData->VerifyData))
     {
         if(0 != pMsgPkt->CCFlag)
         {
-            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_PERMISSION_DENIED);
-            MSG_PostMsg(&MsgPkt);
+            pResMsgData->CC = CC_PERMISSION_DENIED;
+            MSG_PostMsg(&ResMsgPkt);
         }
         
         return STAT_ERR;
     }
     
-    code = SERVER_DelUser(UserName, TRUE);
+    pReqMsgData->DelUserName[USER_NAME_MAX_LENGTH-1] = '\0';
+    code = SERVER_DelUser(pReqMsgData->DelUserName, TRUE);
     
     if(0 != pMsgPkt->CCFlag)
     {
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, code);
-        MSG_PostMsg(&MsgPkt);
+        pResMsgData->CC = code;
+        MSG_PostMsg(&ResMsgPkt);
     }
 
     if(CC_NORMAL == code)
     {
-        LOG_INFO("[Del admin][%s] Success\n", UserName);
+        LOG_INFO("[Del admin][%s] Success\n", pReqMsgData->DelUserName);
     }
 
     return STAT_OK;
@@ -451,7 +436,7 @@ G_STATUS SERVER_ROOT_DelAdmin(MsgPkt_t *pMsgPkt)
 
 
 
-#define ADMIN_LEVEL_FUNC_START //Only use for locating function efficiently
+#define ADMIN_LEVEL //Only use for locating function efficiently
 //Admin level function
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -460,65 +445,61 @@ G_STATUS SERVER_ROOT_DelAdmin(MsgPkt_t *pMsgPkt)
  *  @Return: STAT_OK / STAT_ERR
  *  @Note:   None
  */
-static G_STATUS SERVER_ADMIN_VerifyIdentity(MsgPkt_t *pMsgPkt)
+static G_STATUS SERVER_ADMIN_VerifyIdentity(MsgDataVerifyIdentity_t *pVerifyData)
 {
     char SmallBuf[SMALL_BUF_SIZE];
     int fd;
     int ReadDataLength;
     uint64_t CorrectUserID;
-    uint64_t UserID;
-    char UserName[USER_NAME_MAX_LENGTH];
     char CorrectPassword[PASSWORD_MAX_LENGTH];
-    char password[PASSWORD_MAX_LENGTH];
+
+    pVerifyData->UserName[USER_NAME_MAX_LENGTH-1] = '\0';
+    pVerifyData->password[PASSWORD_MAX_LENGTH-1] = '\0';
     
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, UserName, sizeof(UserName));
-    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_USER_LIST_DIR, UserName);
+    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s/%s", 
+        SERVER_ROOT_DIR, pVerifyData->UserName, SERVER_IDENTITY_FILE_NAME);
     if(0 != access(SmallBuf, F_OK))
     {
-        LOG_WARNING("[Admin verify][%s] Admin does not exist\n", UserName);
+        LOG_WARNING("[Admin verify][%s] Admin does not exist\n", pVerifyData->UserName);
         return STAT_ERR;
     }
-
+    
     fd= open(SmallBuf, O_RDONLY);
     if(0 > fd)
     {
-        LOG_ERROR("[Admin verify][%s] open(): %s\n", UserName, strerror(errno));
+        LOG_ERROR("[Admin verify][%s] open(): %s\n", pVerifyData->UserName, strerror(errno));
         return STAT_ERR;
     }
-
+    
     ReadDataLength = read(fd, &CorrectUserID, sizeof(uint64_t));
     if(sizeof(uint64_t) != ReadDataLength)
     {
         close(fd);
-        LOG_ERROR("[Admin verify][%s] read(): %s\n", UserName, strerror(errno));
+        LOG_ERROR("[Admin verify][%s] read(): %s\n", pVerifyData->UserName, strerror(errno));
         return STAT_ERR;
     }
-
+    
 #ifdef __VERIFY_USER_ID
     if(!(CorrectUserID>>63))
     {
         close(fd);
-        LOG_WARNING("[Admin verify][%s] Not an admin\n", UserName);
+        LOG_WARNING("[Admin verify][%s] Not an admin\n", pVerifyData->UserName);
         return STAT_ERR;
     }
 
-    UserID = MSG_Get64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID);
-    if(CorrectUserID != UserID)
+    if(CorrectUserID != pVerifyData->UserID)
     {
         close(fd);
-        LOG_WARNING("[Admin verify][%s] Invalid user id: 0x%lx\n", UserName, UserID);
+        LOG_WARNING("[Admin verify][%s] Invalid user id: 0x%lx\n", pVerifyData->UserName, pVerifyData->UserID);
         return STAT_ERR;
     }
-#else
-    UserID = 0;
-    UserID = UserID;
 #endif
     
     ReadDataLength = read(fd, CorrectPassword, PASSWORD_MAX_LENGTH);
     if(PASSWORD_MIN_LENGTH > ReadDataLength)
     {
         close(fd);
-        LOG_ERROR("[Admin verify][%s] read(): %s\n", UserName, strerror(errno));
+        LOG_ERROR("[Admin verify][%s] Invalid format in %s\n", pVerifyData->UserName, SmallBuf);
         return STAT_ERR;
     }
 
@@ -531,11 +512,10 @@ static G_STATUS SERVER_ADMIN_VerifyIdentity(MsgPkt_t *pMsgPkt)
         CorrectPassword[PASSWORD_MAX_LENGTH-1] = '\0';
     }
 
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, password, PASSWORD_MAX_LENGTH);
-    if(0 != strcmp(CorrectPassword, password))
+    if(0 != strcmp(CorrectPassword, pVerifyData->password))
     {
         close(fd);
-        LOG_WARNING("[Admin verify][%s] Password error\n", UserName);
+        LOG_WARNING("[Admin verify][%s] Password error\n", pVerifyData->UserName);
         return STAT_ERR;
     }
 
@@ -551,57 +531,48 @@ static G_STATUS SERVER_ADMIN_VerifyIdentity(MsgPkt_t *pMsgPkt)
  */
 G_STATUS SERVER_ADMIN_AddUser(MsgPkt_t *pMsgPkt)
 {
-    MsgPkt_t MsgPkt;
-    char UserName[USER_NAME_MAX_LENGTH];
-    char AdminUserName[USER_NAME_MAX_LENGTH];
-    char password[PASSWORD_MAX_LENGTH];
+    MsgPkt_t ResMsgPkt;
+    MsgDataAddUser_t *pReqMsgData;
+    MsgDataRes_t *pResMsgData;
     COMPLETION_CODE code;
-    
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, AdminUserName, USER_NAME_MAX_LENGTH);
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_USER_NAME, UserName, USER_NAME_MAX_LENGTH);
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_PASSWORD, password, PASSWORD_MAX_LENGTH);
 
+    pReqMsgData = (MsgDataAddUser_t *)pMsgPkt->data;
+    pResMsgData = (MsgDataRes_t *)&ResMsgPkt.data;
+    
     if(0 != pMsgPkt->CCFlag)
     {
-        MsgPkt.cmd = MSG_CMD_SEND_TO_USER;
-        MsgPkt.CCFlag = 0;
-        MsgPkt.fd = pMsgPkt->fd;
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_NORMAL);
-        
-        if(0 > pMsgPkt->fd)
-        {
-            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_INVALID_FD);
-            MSG_PostMsg(&MsgPkt);
-            LOG_WARNING("[Add user][%s][%s] Invalid fd value: %d\n", 
-                AdminUserName, UserName, pMsgPkt->fd);
-            
-            return STAT_ERR;
-        }
+        ResMsgPkt.cmd = MSG_CMD_SEND_RES;
+        ResMsgPkt.fd = pMsgPkt->fd;
+        pResMsgData->CC = CC_NORMAL;
     }
 
-    if(STAT_OK != SERVER_ADMIN_VerifyIdentity(pMsgPkt))
+    if(STAT_OK != SERVER_ADMIN_VerifyIdentity(&pReqMsgData->VerifyData))
     {
         if(0 != pMsgPkt->CCFlag)
         {
-            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_PERMISSION_DENIED);
-            MSG_PostMsg(&MsgPkt);
+            pResMsgData->CC = CC_PERMISSION_DENIED;
+            MSG_PostMsg(&ResMsgPkt);
         }
+        
         return STAT_ERR;
     }
     
-    code = SERVER_AddUser(UserName, password, FALSE);
+    pReqMsgData->AddUserName[USER_NAME_MAX_LENGTH-1] = '\0';
+    pReqMsgData->AddPassword[PASSWORD_MAX_LENGTH-1] = '\0';
+    code = SERVER_AddUser(pReqMsgData->AddUserName, pReqMsgData->AddPassword, FALSE);
     
     if(0 != pMsgPkt->CCFlag)
     {
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, code);
-        MSG_PostMsg(&MsgPkt);
+        pResMsgData->CC = code;
+        MSG_PostMsg(&ResMsgPkt);
     }
 
     if(CC_NORMAL == code)
     {
-        LOG_INFO("[Add user][%s][%s] Success\n", AdminUserName, UserName);
+        LOG_INFO("[Add user][%s][%s] Success\n", 
+            pReqMsgData->VerifyData.UserName, pReqMsgData->AddUserName);
     }
-
+    
     return STAT_OK;
 }
 
@@ -612,54 +583,45 @@ G_STATUS SERVER_ADMIN_AddUser(MsgPkt_t *pMsgPkt)
  */
 G_STATUS SERVER_ADMIN_DelUser(MsgPkt_t *pMsgPkt)
 {
-    MsgPkt_t MsgPkt;
-    char UserName[USER_NAME_MAX_LENGTH];
-    char AdminUserName[USER_NAME_MAX_LENGTH];
+    MsgPkt_t ResMsgPkt;
+    MsgDataDelUser_t *pReqMsgData;
+    MsgDataRes_t *pResMsgData;
     COMPLETION_CODE code;
-    
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, AdminUserName, USER_NAME_MAX_LENGTH);
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_USER_NAME, UserName, USER_NAME_MAX_LENGTH);
+
+    pReqMsgData = (MsgDataDelUser_t *)pMsgPkt->data;
+    pResMsgData = (MsgDataRes_t *)&ResMsgPkt.data;
     
     if(0 != pMsgPkt->CCFlag)
     {
-        MsgPkt.cmd = MSG_CMD_SEND_TO_USER;
-        MsgPkt.CCFlag = 0;
-        MsgPkt.fd = pMsgPkt->fd;
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_NORMAL);
-        
-        if(0 > pMsgPkt->fd)
-        {
-            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_INVALID_FD);
-            MSG_PostMsg(&MsgPkt);
-            LOG_WARNING("[Del user][%s][%s] Invalid fd value: %d\n", 
-                AdminUserName, UserName, pMsgPkt->fd);
-            
-            return STAT_ERR;
-        }
+        ResMsgPkt.cmd = MSG_CMD_SEND_RES;
+        ResMsgPkt.fd = pMsgPkt->fd;
+        pResMsgData->CC = CC_NORMAL;
     }
-    
-    if(STAT_OK != SERVER_ADMIN_VerifyIdentity(pMsgPkt))
+
+    if(STAT_OK != SERVER_ADMIN_VerifyIdentity(&pReqMsgData->VerifyData))
     {
         if(0 != pMsgPkt->CCFlag)
         {
-            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_PERMISSION_DENIED);
-            MSG_PostMsg(&MsgPkt);
+            pResMsgData->CC = CC_PERMISSION_DENIED;
+            MSG_PostMsg(&ResMsgPkt);
         }
         
         return STAT_ERR;
     }
     
-    code = SERVER_DelUser(UserName, FALSE);
+    pReqMsgData->DelUserName[USER_NAME_MAX_LENGTH-1] = '\0';
+    code = SERVER_DelUser(pReqMsgData->DelUserName, FALSE);
     
     if(0 != pMsgPkt->CCFlag)
     {
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, code);
-        MSG_PostMsg(&MsgPkt);
+        pResMsgData->CC = code;
+        MSG_PostMsg(&ResMsgPkt);
     }
 
     if(CC_NORMAL == code)
     {
-        LOG_INFO("[Del user][%s][%s] Success\n", AdminUserName, UserName);
+        LOG_INFO("[Add user][%s][%s] Success\n", 
+            pReqMsgData->VerifyData.UserName, pReqMsgData->DelUserName);
     }
     
     return STAT_OK;
@@ -671,7 +633,7 @@ G_STATUS SERVER_ADMIN_DelUser(MsgPkt_t *pMsgPkt)
 
 
 
-#define COMMON_FUNC_START //Only use for locating function efficiently
+#define COMMON_FUNC //Only use for locating function efficiently
 //Common function
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -778,37 +740,32 @@ G_STATUS SERVER_BeforeCreateTask(void)
  */
 G_STATUS SERVER_UserLogin(MsgPkt_t *pMsgPkt)
 {
-    MsgPkt_t MsgPkt;
-    char UserName[USER_NAME_MAX_LENGTH];
+    MsgPkt_t ResMsgPkt;
+    MsgDataVerifyIdentity_t *pVerifyData;
+    MsgDataRes_t *pResMsgData;
     char SmallBuf[SMALL_BUF_SIZE];
     int fd;
     int ReadDataLength;
     session_t *pCurSession;
     uint64_t UserID;
+
+    pVerifyData = (MsgDataVerifyIdentity_t *)pMsgPkt->data;
+    pResMsgData = (MsgDataRes_t *)&ResMsgPkt.data;
     
-    MsgPkt.cmd = MSG_CMD_SEND_TO_USER;
-    MsgPkt.fd = pMsgPkt->fd;
-    MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_NORMAL);
+    ResMsgPkt.cmd = MSG_CMD_SEND_RES;
+    ResMsgPkt.fd = pMsgPkt->fd;
+    pResMsgData->CC = CC_NORMAL;
     
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, UserName, USER_NAME_MAX_LENGTH);
-    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_USER_LIST_DIR, UserName);
-    
-    if(0 > pMsgPkt->fd)
-    {
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_INVALID_FD);
-        MSG_PostMsg(&MsgPkt);
-        
-        LOG_WARNING("[%s][%s] Invalid fd value: %d\n", __func__, UserName, pMsgPkt->fd);
-        
-        return STAT_ERR;
-    }
+    pVerifyData->UserName[USER_NAME_MAX_LENGTH-1] = '\0';
+    pVerifyData->password[PASSWORD_MAX_LENGTH-1] = '\0';
+    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s/%s", 
+        SERVER_ROOT_DIR, pVerifyData->UserName, SERVER_IDENTITY_FILE_NAME);
     
     if(0 != access(SmallBuf, F_OK))
     {
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_USER_DOES_NOT_EXIST);
-        MSG_PostMsg(&MsgPkt);
-        
-        LOG_WARNING("[%s][%s] User does not exist\n", __func__, UserName);
+        pResMsgData->CC = CC_USER_DOES_NOT_EXIST;
+        MSG_PostMsg(&ResMsgPkt);
+        LOG_WARNING("[%s][%s] User does not exist\n", __func__, pVerifyData->UserName);
         
         return STAT_ERR;
     }
@@ -816,10 +773,9 @@ G_STATUS SERVER_UserLogin(MsgPkt_t *pMsgPkt)
     fd = open(SmallBuf, O_RDONLY);
     if(0 > fd)
     {
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_FAIL_TO_OPEN);
-        MSG_PostMsg(&MsgPkt);
-        
-        LOG_ERROR("[%s][%s] open(): %s\n", __func__, UserName, strerror(errno));
+        pResMsgData->CC = CC_FAIL_TO_OPEN;
+        MSG_PostMsg(&ResMsgPkt);
+        LOG_ERROR("[%s][%s] open(): %s\n", __func__, pVerifyData->UserName, strerror(errno));
         
         return STAT_ERR;
     }
@@ -828,10 +784,9 @@ G_STATUS SERVER_UserLogin(MsgPkt_t *pMsgPkt)
     if(sizeof(UserID) != ReadDataLength)
     {
         close(fd);
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_FAIL_TO_READ);
-        MSG_PostMsg(&MsgPkt);
-        
-        LOG_ERROR("[%s][%s] read(): %s\n", __func__, UserName, strerror(errno));
+        pResMsgData->CC = CC_FAIL_TO_READ;
+        MSG_PostMsg(&ResMsgPkt);
+        LOG_ERROR("[%s][%s] read(): %s\n", __func__, pVerifyData->UserName, strerror(errno));
         
         return STAT_ERR;
     }
@@ -844,20 +799,21 @@ G_STATUS SERVER_UserLogin(MsgPkt_t *pMsgPkt)
     if(NULL == pCurSession)
     {
         pthread_mutex_unlock(&g_SessionLock);
-        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_SESSION_IS_NOT_FOUND);
-        MSG_PostMsg(&MsgPkt);
+        pResMsgData->CC = CC_SESSION_IS_NOT_FOUND;
+        MSG_PostMsg(&ResMsgPkt);
+        LOG_WARNING("[%s][%s] Session is not found\n", __func__, pVerifyData->UserName);
         
-        LOG_WARNING("[%s][%s] Session is not found\n", __func__, UserName);
         return STAT_ERR;
     }
     
     pCurSession->UserInfo.UserID = UserID;
-    memcpy(pCurSession->UserInfo.UserName, UserName, USER_NAME_MAX_LENGTH);
-    LOG_INFO("[%s][%s] Login\n", UserName, pCurSession->ip);
+    memcpy(pCurSession->UserInfo.UserName, pVerifyData->UserName, USER_NAME_MAX_LENGTH);
+    LOG_INFO("[%s][%s] Login\n", pVerifyData->UserName, pCurSession->ip);
     pthread_mutex_unlock(&g_SessionLock);
     
     MSG_Set64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID, UserID);
-    MSG_PostMsg(&MsgPkt);
+    pResMsgData->UserID = UserID;
+    MSG_PostMsg(&ResMsgPkt);
     
     return STAT_OK;
 }
@@ -869,47 +825,20 @@ G_STATUS SERVER_UserLogin(MsgPkt_t *pMsgPkt)
  */
 G_STATUS SERVER_UserLogout(MsgPkt_t *pMsgPkt)
 {
+    MsgDataVerifyIdentity_t *pVerifyData;
+    
     if(0 > pMsgPkt->fd)
         return STAT_ERR;
 
-    //MsgPkt_t MsgPkt;
-    char UserName[USER_NAME_MAX_LENGTH];
-
-    MSG_GetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, UserName, USER_NAME_MAX_LENGTH);
+    pVerifyData = (MsgDataVerifyIdentity_t *)pMsgPkt->data;
     
-//    if(0 != pMsgPkt->CCFlag)
-//    {
-//        MsgPkt.cmd = MSG_CMD_SEND_TO_USER;
-//        MsgPkt.fd = pMsgPkt->fd;
-//        MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_NORMAL);
-//        
-//        if(0 > pMsgPkt->fd)
-//        {
-//            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_INVALID_FD);
-//            MSG_PostMsg(&MsgPkt);
-//            LOG_WARNING("[Del admin][%s] Invalid fd value: %d\n", UserName, pMsgPkt->fd);
-//            return STAT_ERR;
-//        }
-//    }
-
     if(STAT_OK != SERVER_CloseSession(pMsgPkt->fd, -1))
     {
-//        if(0 != pMsgPkt->CCFlag)
-//        {
-//            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_FAIL_TO_CLOSE_SESSION);
-//            MSG_PostMsg(&MsgPkt);
-//        }
-        
-        LOG_WARNING("[%s] Fail to close session\n", UserName);
+        LOG_WARNING("[%s] Fail to close session\n", pVerifyData->UserName);
         return STAT_ERR;
     }
     
-//    if(0 != pMsgPkt->CCFlag)
-//    {
-//        MSG_PostMsg(&MsgPkt);
-//    }
-    
-    LOG_INFO("[%s] Logout\n", UserName);
+    LOG_INFO("[%s] Logout\n", pVerifyData->UserName);
     
     return STAT_OK;
 }
@@ -975,7 +904,7 @@ G_STATUS SERVER_CheckAllUserStatus(MsgPkt_t *pMsgPkt)
 
 
 
-#define STATIC_FUNC_START //Only use for locating function efficiently
+#define STATIC_FUNC //Only use for locating function efficiently
 //Static function
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -992,16 +921,6 @@ static G_STATUS SERVER_InitServerFile(void)
         {
             LOG_FATAL_ERROR("[%s] Fail to create server root directory: %s\n", 
                 __func__, SERVER_ROOT_DIR);
-            return STAT_FATAL_ERR;
-        }
-    }
-    
-    if(0 != access(SERVER_USER_LIST_DIR, F_OK))
-    {
-        if(0 != mkdir(SERVER_USER_LIST_DIR, S_IRUSR | S_IWUSR))
-        {
-            LOG_FATAL_ERROR("[%s] Fail to create server user list directory: %s\n", 
-                __func__, SERVER_USER_LIST_DIR);
             return STAT_FATAL_ERR;
         }
     }
@@ -1037,7 +956,7 @@ static int SERVER_ConfigServer(struct sockaddr_in *pServerSocketAddr)
     SocketFd = socket(AF_INET, SOCK_STREAM, 0);
     if(0 > SocketFd)
     {
-        LOG_FATAL_ERROR("[SERVER config] socket(): %s(error code: %d)\n", strerror(errno), errno);
+        LOG_FATAL_ERROR("[SERVER config] socket(): %s\n", strerror(errno));
         return -1;
     }
     
@@ -1049,7 +968,7 @@ static int SERVER_ConfigServer(struct sockaddr_in *pServerSocketAddr)
     res = bind(SocketFd, (struct sockaddr*)pServerSocketAddr, sizeof(struct sockaddr_in));
     if(0 != res)
     {
-        LOG_FATAL_ERROR("[SERVER config] bind(): %s(error code: %d)\n", strerror(errno), errno);
+        LOG_FATAL_ERROR("[SERVER config] bind(): %s\n", strerror(errno));
         return -1;
     }
     
@@ -1057,7 +976,7 @@ static int SERVER_ConfigServer(struct sockaddr_in *pServerSocketAddr)
     if(0 != res)
     {
         close(SocketFd);
-        LOG_FATAL_ERROR("[SERVER config] listen(): %s(error code: %d)\n", strerror(errno), errno);
+        LOG_FATAL_ERROR("[SERVER config] listen(): %s\n", strerror(errno));
         return -1;
     }
 
@@ -1105,12 +1024,22 @@ static COMPLETION_CODE SERVER_AddUser(const char *pUserName, const char *pPasswo
     int WriteDataLength;
     int length;
 
-    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_USER_LIST_DIR, pUserName);
+    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_ROOT_DIR, pUserName);
+    
     if(0 == access(SmallBuf, F_OK))
     {
         LOG_WARNING("[Add user][%s] User has been exist\n", pUserName);
         return CC_USER_HAS_BEEN_EXIST;
     }
+
+    if(0 != mkdir(SmallBuf, 0600))
+    {
+        LOG_ERROR("[Add user][%s] mkdir(): %s\n", pUserName, strerror(errno));
+        return CC_FAIL_TO_MK_DIR;
+    }
+    
+    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s/%s", 
+        SERVER_ROOT_DIR, pUserName, SERVER_IDENTITY_FILE_NAME);
     
     UserID = SERVER_CreateUserID();
     if(TRUE == flag)
@@ -1168,9 +1097,21 @@ static COMPLETION_CODE SERVER_DelUser(const char *pUserName, _BOOL_ flag)
     uint64_t UserID;
     int ReadDataLength;
 
-    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_USER_LIST_DIR, pUserName);
+    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_ROOT_DIR, pUserName);
+    
     if(0 != access(SmallBuf, F_OK))
     {
+        LOG_WARNING("[Del user][%s] User does not exist\n", pUserName);
+        return CC_USER_DOES_NOT_EXIST;
+    }
+    
+    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s/%s", 
+        SERVER_ROOT_DIR, pUserName, SERVER_IDENTITY_FILE_NAME);
+        
+    if(0 != access(SmallBuf, F_OK))
+    {
+        snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_ROOT_DIR, pUserName);
+        rmdir(SmallBuf);
         LOG_WARNING("[Del user][%s] User does not exist\n", pUserName);
         return CC_USER_DOES_NOT_EXIST;
     }
@@ -1246,8 +1187,8 @@ static G_STATUS SERVER_CreateSession(int fd, struct sockaddr_in *pClientSocketAd
         g_MaxFd = fd;
     }
     
-    LOG_DEBUG("[Create session] New session %s, fd=%d, session addr: 0x%lx\n", pNewSession->ip, fd, 
-        (int64_t)pNewSession);
+    LOG_DEBUG("[Create session] New session %s, fd=%d, session_addr=0x%lx\n", 
+        pNewSession->ip, fd, (int64_t)pNewSession);
     
     pthread_mutex_unlock(&g_SessionLock);
     
@@ -1275,8 +1216,6 @@ static G_STATUS SERVER_CloseSession(int fd, uint64_t UserID)
         return STAT_ERR;
     }
 
-    LOG_DEBUG("[SERVER close session] CurSession: 0x%lx\n", (int64_t)pCurSession);
-    
     SERVER_FreeSession(pPrevSession, pCurSession, TRUE);
     
     pthread_mutex_unlock(&g_SessionLock);
@@ -1330,13 +1269,11 @@ static void SERVER_GetSession(session_t **ppPrevSession, session_t **ppCurSessio
     if(NULL != ppPrevSession)
     {
         *ppPrevSession = pPrevSession;
-        LOG_DEBUG("[SERVER get session] PrevSession: 0x%lx\n", (int64_t)*ppPrevSession);
     }
 
     if(NULL != ppCurSession)
     {
         *ppCurSession = pCurSession;
-        LOG_DEBUG("[SERVER get session] CurSession: 0x%lx\n", (int64_t)*ppCurSession);
     }
 }
 
@@ -1365,7 +1302,6 @@ static void SERVER_FreeSession(session_t *pPrevSession, session_t *pCurSession, 
         close(fd);
     }
 
-    LOG_DEBUG("[SERVER free session] session addr: 0x%lx\n", (int64_t)pCurSession);
     free(pCurSession);
     g_HeadSession.fd--;
     
@@ -1375,7 +1311,7 @@ static void SERVER_FreeSession(session_t *pPrevSession, session_t *pCurSession, 
         SERVER_UpdateMaxFd(&g_MaxFd);
     }
     
-    LOG_DEBUG("[SERVER free session][fd=%d] success\n", fd);
+    LOG_DEBUG("[SERVER free session][0x%lx] success\n", (int64_t)pCurSession);
 }
 
 /*

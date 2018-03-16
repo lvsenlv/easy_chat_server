@@ -96,7 +96,11 @@ int main(int argc, char **argv)
     }
     else
     {
+#ifdef __LOG_CLEAR
+        g_DaemonLogFp = fopen(DAEMON_LOG_FILE, "w+");
+#else
         g_DaemonLogFp = fopen(DAEMON_LOG_FILE, "a+");
+#endif
     }
 
     if(0 > g_DaemonLogFp)

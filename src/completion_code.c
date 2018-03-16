@@ -21,6 +21,8 @@ void InitErrorCodeTable(void)
     g_CompletionCodeTable[CC_FAIL_TO_READ]              = "Fail to read from file";
     g_CompletionCodeTable[CC_FAIL_TO_UNLINK]            = "Fail to delete file";
     g_CompletionCodeTable[CC_FAIL_TO_MALLOC]            = "Fail to malloc";
+    g_CompletionCodeTable[CC_FAIL_TO_MK_DIR]            = "Fail to make directory";
+    g_CompletionCodeTable[CC_FAIL_TO_RM_DIR]            = "Fail to delete directory";
     g_CompletionCodeTable[CC_PASSWORD_IS_TOO_SHORT]     = "Password is to short";
     g_CompletionCodeTable[CC_SESSION_IS_NOT_FOUND]      = "Session is not found";
     g_CompletionCodeTable[CC_FAIL_TO_CLOSE_SESSION]     = "Fail to close session";

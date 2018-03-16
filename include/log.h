@@ -15,6 +15,11 @@
 #define LOG_SYSLOG_FILE                     "/var/log/easy_chat_syslog"
 #define LOG_MONITOR_TIME_INTERVAL           10 //Unit: second
 #define LOG_FILE_MAX_SIZE                   (1024*10) //10Mb
+#ifdef __LOG_CLEAR
+#define LOG_OPEN_FORMAT                     "w+"
+#else
+#define LOG_OPEN_FORMAT                     "a+"
+#endif
 
 #define LOG_CheckSize(fp) \
         do \

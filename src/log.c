@@ -39,7 +39,7 @@ G_STATUS LOG_SysLog(char *pFormat, ...)
     if(0 >= length)
         return STAT_ERR;
 
-    fp = fopen(LOG_SYSLOG_FILE, "a+");
+    fp = fopen(LOG_SYSLOG_FILE, LOG_OPEN_FORMAT);
     if(NULL == fp)
         return STAT_ERR;
 
@@ -59,9 +59,11 @@ G_STATUS LOG_InitLog(const char *LogPath)
         
     if(STAT_OK != LOG_InitLogFile(LogPath))
         return STAT_ERR;
-    
+
+#ifndef __LOG_CLEAR
     if(STAT_OK != LOG_CheckLogFileSize())
         return STAT_ERR;
+#endif
     
     return STAT_OK;
 }
@@ -171,7 +173,7 @@ static G_STATUS LOG_InitLogFile(const char *LogPath)
         return STAT_ERR;
     }
     
-    fp = fopen(buf, "a+");
+    fp = fopen(buf, LOG_OPEN_FORMAT);
     if(NULL == fp)
     {
         LOG_SysLog("Fail to create or open log file: %s\n", buf);
@@ -187,7 +189,7 @@ static G_STATUS LOG_InitLogFile(const char *LogPath)
         return STAT_ERR;
     }
         
-    fp = fopen(buf, "a+");
+    fp = fopen(buf, LOG_OPEN_FORMAT);
     if(NULL == fp)
     {
         LOG_SysLog("Fail to create or open log file: %s\n", buf);
@@ -200,7 +202,7 @@ static G_STATUS LOG_InitLogFile(const char *LogPath)
     if(STAT_OK != CreateFile(buf, 0600))
         return STAT_ERR;
     
-    fp = fopen(buf, "a+");
+    fp = fopen(buf, LOG_OPEN_FORMAT);
     if(NULL == fp)
     {
         LOG_SysLog("Fail to create or open log file: %s\n", buf);
@@ -216,7 +218,7 @@ static G_STATUS LOG_InitLogFile(const char *LogPath)
         return STAT_ERR;
     }
     
-    fp = fopen(buf, "a+");
+    fp = fopen(buf, LOG_OPEN_FORMAT);
     if(NULL == fp)
     {
         LOG_SysLog("Fail to create or open log file: %s\n", buf);
@@ -233,7 +235,7 @@ static G_STATUS LOG_InitLogFile(const char *LogPath)
         return STAT_ERR;
     }
     
-    fp = fopen(buf, "a+");
+    fp = fopen(buf, LOG_OPEN_FORMAT);
     if(NULL == fp)
     {
         LOG_SysLog("Fail to create or open log file: %s\n", buf);

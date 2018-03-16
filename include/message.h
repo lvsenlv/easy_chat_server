@@ -9,6 +9,7 @@
 #define __MESSAGE_H
 
 #include "common.h"
+#include "completion_code.h"
 
 #define MSG_QUEUE_NAME                      "/var/MsgHandleQueue"
 #define HANDSHAKE_SYMBOL                    '#'
@@ -27,6 +28,7 @@
 #define MSG_SELECT_TIME_INTERVAL            5 //Unit: second
 #define MSG_MAX_NUM                         1024
 #define MSG_DATA_MAX_LENGTH                 1024
+#define MSG_RESERVE_DATA_MAX_LENGTH         64
 
 //Pay attention to the interval of following offset
 #define MSG_DATA_OFFSET_CC                  0
@@ -40,6 +42,7 @@
 
 typedef enum {
     MSG_CMD_SEND_TO_USER = 1,
+    MSG_CMD_SEND_RES,
     MSG_CMD_ROOT_LOGIN,
     MSG_CMD_ROOT_ADD_ADMIN,
     MSG_CMD_ROOT_DEL_ADMIN,
@@ -57,7 +60,29 @@ typedef struct MsgPktStruct {
     char data[MSG_DATA_MAX_LENGTH];
     char CCFlag; //1 means it need to send a response message
     int CheckSum;
-}MsgPkt_t;
+}ALIGN_4K MsgPkt_t;
+
+typedef struct MsgDataVerifyIdentityStruct {
+    uint64_t UserID;
+    char UserName[USER_NAME_MAX_LENGTH];
+    char password[PASSWORD_MAX_LENGTH];
+}MsgDataVerifyIdentity_t;
+
+typedef struct MsgDataResStruct {
+    COMPLETION_CODE CC;
+    uint64_t UserID;
+}MsgDataRes_t;
+
+typedef struct MsgDataAddUserStruct {
+    MsgDataVerifyIdentity_t VerifyData;
+    char AddUserName[USER_NAME_MAX_LENGTH];
+    char AddPassword[PASSWORD_MAX_LENGTH];
+}MsgDataAddUser_t;
+
+typedef struct MsgDataDelUserStruct {
+    MsgDataVerifyIdentity_t VerifyData;
+    char DelUserName[USER_NAME_MAX_LENGTH];
+}MsgDataDelUser_t;
 
 extern char g_MsgTaskLiveFlag;
 extern char *g_pCmdDetail[MSG_CMD_MAX];
@@ -69,6 +94,7 @@ G_STATUS MSG_BeforeCreateTask(void);
 G_STATUS MSG_LockMsgQueue(int fd);
 G_STATUS MSG_UnlockMsgQueue(int fd);
 G_STATUS MSG_PostMsg(MsgPkt_t *pMsgPkt);
+G_STATUS MSG_PostMsgNoLock(MsgPkt_t *pMsgPkt);
 G_STATUS MSG_GetResponse(MsgPkt_t *pMsgPkt, int timeout);
 
 

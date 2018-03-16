@@ -28,9 +28,11 @@ static G_STATUS MSG_InitGlobalVariables(void);
 static G_STATUS MSG_ProcessMsg(MsgPkt_t *pMsgPkt);
 static G_STATUS MSG_SendToUser(MsgPkt_t *pMsgPkt);
 
+#ifdef __DEBUG
+char *g_pCmdDetail[MSG_CMD_MAX];
+#endif
 int g_MsgQueue;
 char g_MsgTaskLiveFlag;
-char *g_pCmdDetail[MSG_CMD_MAX];
 
 G_STATUS MSG_CreateTask(pthread_t *pMsgTaskID)
 {
@@ -116,7 +118,7 @@ void *MSG_MessageTask(void *pArg)
 
 
 
-#define COMMON_FUNC_START //Only use for locating function efficiently
+#define COMMON_FUNC //Only use for locating function efficiently
 //Common function
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 G_STATUS MSG_BeforeCreateTask(void)
@@ -200,6 +202,22 @@ G_STATUS MSG_PostMsg(MsgPkt_t *pMsgPkt)
     return STAT_OK;
 }
 
+G_STATUS MSG_PostMsgNoLock(MsgPkt_t *pMsgPkt)
+{
+    int WriteDataLength;
+    
+    WriteDataLength = write(g_MsgQueue, pMsgPkt, sizeof(MsgPkt_t));
+    if(sizeof(MsgPkt_t) != WriteDataLength)
+    {
+        LOG_ERROR("[Post msg] write(): %s\n", strerror(errno));
+        return STAT_ERR;
+    }
+
+    LOG_DEBUG("[Post msg no lock] Success, cmd: %s\n", g_pCmdDetail[pMsgPkt->cmd]);
+    
+    return STAT_OK;
+}
+
 G_STATUS MSG_GetResponse(MsgPkt_t *pMsgPkt, int timeout)
 {
     if(0 > timeout)
@@ -255,7 +273,7 @@ G_STATUS MSG_GetResponse(MsgPkt_t *pMsgPkt, int timeout)
 
 
 
-#define STATIC_FUNC_START //Only use for locating function efficiently
+#define STATIC_FUNC //Only use for locating function efficiently
 //Static function
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -291,6 +309,7 @@ static G_STATUS MSG_InitGlobalVariables(void)
 {
     g_MsgTaskLiveFlag = 0;
 
+#ifdef __DEBUG
     g_pCmdDetail[MSG_CMD_SEND_TO_USER]              = "send to user";
     g_pCmdDetail[MSG_CMD_ROOT_LOGIN]                = "root login";
     g_pCmdDetail[MSG_CMD_ROOT_ADD_ADMIN]            = "add admin";
@@ -300,6 +319,7 @@ static G_STATUS MSG_InitGlobalVariables(void)
     g_pCmdDetail[MSG_CMD_USER_LOGOUT]               = "user logout";
     g_pCmdDetail[MSG_CMD_CHECK_ALL_USER_STATUS]     = "check status";
     g_pCmdDetail[MSG_CMD_DO_NOTHING]                = "do nothing";
+#endif
     
     return STAT_OK;
 }

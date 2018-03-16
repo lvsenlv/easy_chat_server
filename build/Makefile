@@ -6,7 +6,7 @@ SRC_DIR             = ../src
 OBJ_DIR             = ./object
 LIB_DIR             = ../lib
 OBJS                = common.o log.o completion_code.o message.o server.o main.o
-DEF                 = -D__LINUX -D__64BIT -D__SERVER -D__DEBUG
+DEF                 = -D__LINUX -D__64BIT -D__SERVER -D__DEBUG -D__LOG_CLEAR
 INC                 = -I../include 
 TARGET              = $(TARGET_BASE_NAME)
 
