@@ -366,7 +366,7 @@ static G_STATUS ServerMain(int fd)
                     LOG_FATAL_ERROR("[Main task] Fail to kill msg task, process exit\n");
                     return STAT_ERR;
                 }
-
+                
                 if(STAT_OK != MSG_CreateTask(&MsgTaskID))
                     return STAT_ERR;
 
@@ -413,7 +413,12 @@ static G_STATUS ServerMain(int fd)
                     return STAT_ERR;
                 }
 
-                close(g_ServerSocketFd);
+                if(0 < g_ServerSocketFd)
+                {
+                    close(g_ServerSocketFd);
+                    g_ServerSocketFd = -1;
+                }
+                
                 if(STAT_OK != SERVER_CreateTask(&ServerTaskID))
                     return STAT_ERR;
 

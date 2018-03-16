@@ -28,10 +28,11 @@ static G_STATUS SERVER_InitGlobalVaribles(void);
 static uint64_t SERVER_CreateUserID(void);
 static G_STATUS SERVER_CreateSession(int fd, struct sockaddr_in *pClientSocketAddr);
 static G_STATUS SERVER_CloseSession(int fd, uint64_t UserID);
-static COMPLETION_CODE SERVER_AddUser(const char *pUserName, const char *pPassword, char flag);
-static COMPLETION_CODE SERVER_DelUser(const char *pUserName, char flag);
-static session_t *SERVER_GetSession(int fd, uint64_t UserID);
-static void SERVER_UpdateMaxFd(int *pMaxFd);
+static COMPLETION_CODE SERVER_AddUser(const char *pUserName, const char *pPassword, _BOOL_ flag);
+static COMPLETION_CODE SERVER_DelUser(const char *pUserName, _BOOL_ flag);
+static void SERVER_GetSession(session_t **ppPrevSession, session_t **ppCurSession, int fd, uint64_t UserID);
+static void SERVER_FreeSession(session_t *pPrevSession , session_t *pCurSession, _BOOL_ flag);
+static void SERVER_UpdateMaxFd(__IO int *pMaxFd);
 
 volatile char g_ServerLiveFlag;         //1 mean server task is alive
 int g_ServerSocketFd;                   //It would be initialized in server task
@@ -43,8 +44,8 @@ int g_ServerSocketFd;                   //It would be initialized in server task
         strictly ban using g_LogLockTbl[*] before using g_SessionLock
 */
 pthread_mutex_t g_SessionLock = PTHREAD_MUTEX_INITIALIZER;
-int *g_pMaxFd;                          //It would be initialized in server task
-fd_set *g_pPrevFds;                     //It would be initialized in server task
+__IO int g_MaxFd;                       //It would be initialized in server task
+__IO fd_set g_PrevFds;                  //It would be initialized in server task
 session_t g_HeadSession;
 session_t *g_pTailSession;
 
@@ -90,8 +91,6 @@ void *SERVER_ServerTask(void *pArg)
     struct sockaddr_in ServerSocketAddr;
     struct timeval TimeInterval;
     fd_set fds; 
-    fd_set PrevFds;
-    int MaxFd;
     int res;
     socklen_t ClientSocketAddrLen;
     int ClientSocketFd;
@@ -101,31 +100,28 @@ void *SERVER_ServerTask(void *pArg)
     session_t *pPrevSession;
     session_t *pCurSession;
     int TimeCount;
-    int TmpFd;
     int CurFd;
 
     ServerSocketFd = SERVER_ConfigServer(&ServerSocketAddr);
     if(0 > ServerSocketFd)
         return NULL;
 
-    g_pMaxFd = &MaxFd;
-    g_pPrevFds = &PrevFds;
     g_ServerSocketFd = ServerSocketFd;
     
     MSG_InitMsgPkt(&MsgPkt);
     TimeInterval.tv_usec = 0;
-    MaxFd = ServerSocketFd;
-    FD_ZERO(&PrevFds);
-    FD_SET(ServerSocketFd, &PrevFds);
+    g_MaxFd = ServerSocketFd;
+    FD_ZERO(&g_PrevFds);
+    FD_SET(ServerSocketFd, &g_PrevFds);
     TimeCount = 0;
  
     while(1)
     {
         g_ServerLiveFlag = 1;
-        fds = PrevFds;
+        fds = g_PrevFds;
         TimeInterval.tv_sec = SERVER_SELECT_TIME_INTERVAL;
 
-        res = select(MaxFd+1, &fds, NULL, NULL, &TimeInterval);
+        res = select(g_MaxFd+1, &fds, NULL, NULL, &TimeInterval);
         if(0 > res)
         {
             LOG_DEBUG("[SERVER task] select(): force to close fd\n");
@@ -192,30 +188,15 @@ void *SERVER_ServerTask(void *pArg)
             if(0 > ReadDataLength)
             {
                 pthread_mutex_unlock(&g_SessionLock);
+                LOG_ERROR("[SERVER task] read(): %s\n", strerror(errno));
                 break;
             }
             
             if(0 == ReadDataLength)
             {
-                FD_CLR(pCurSession->fd, &PrevFds);
-                if(g_pTailSession == pCurSession)
-                {
-                    g_pTailSession = pPrevSession;
-                }
-                
-                pPrevSession->pNext = pCurSession->pNext;
-                TmpFd = pCurSession->fd;
                 LOG_DEBUG("[SERVER task][%s] Abnormal disconnection\n", pCurSession->ip);
-                close(pCurSession->fd);
-                free(pCurSession);
+                SERVER_FreeSession(pPrevSession, pCurSession, TRUE);
                 pCurSession = pPrevSession->pNext;
-                g_HeadSession.fd--;
-                
-                if(MaxFd == TmpFd) //If it needs to get new max fd value
-                {
-                    SERVER_UpdateMaxFd(&MaxFd);
-                }
-                
                 continue;
             }
 
@@ -329,7 +310,7 @@ G_STATUS SERVER_ROOT_UserLogin(MsgPkt_t *pMsgPkt)
     fd = pMsgPkt->fd;
     
     pthread_mutex_lock(&g_SessionLock);
-    pCurSession = SERVER_GetSession(fd, -1);
+    SERVER_GetSession(NULL, &pCurSession, fd, -1);
     if(NULL == pCurSession)
     {
         pthread_mutex_unlock(&g_SessionLock);
@@ -392,7 +373,7 @@ G_STATUS SERVER_ROOT_AddAdmin(MsgPkt_t *pMsgPkt)
         return STAT_ERR;
     }
 
-    code = SERVER_AddUser(UserName, password, 1);
+    code = SERVER_AddUser(UserName, password, TRUE);
 
     if(0 != pMsgPkt->CCFlag)
     {
@@ -448,7 +429,7 @@ G_STATUS SERVER_ROOT_DelAdmin(MsgPkt_t *pMsgPkt)
         return STAT_ERR;
     }
     
-    code = SERVER_DelUser(UserName, 1);
+    code = SERVER_DelUser(UserName, TRUE);
     
     if(0 != pMsgPkt->CCFlag)
     {
@@ -608,7 +589,7 @@ G_STATUS SERVER_ADMIN_AddUser(MsgPkt_t *pMsgPkt)
         return STAT_ERR;
     }
     
-    code = SERVER_AddUser(UserName, password, 0);
+    code = SERVER_AddUser(UserName, password, FALSE);
     
     if(0 != pMsgPkt->CCFlag)
     {
@@ -668,7 +649,7 @@ G_STATUS SERVER_ADMIN_DelUser(MsgPkt_t *pMsgPkt)
         return STAT_ERR;
     }
     
-    code = SERVER_DelUser(UserName, 0);
+    code = SERVER_DelUser(UserName, FALSE);
     
     if(0 != pMsgPkt->CCFlag)
     {
@@ -859,7 +840,7 @@ G_STATUS SERVER_UserLogin(MsgPkt_t *pMsgPkt)
     
     fd = pMsgPkt->fd;
     pthread_mutex_lock(&g_SessionLock);
-    pCurSession = SERVER_GetSession(fd, -1);
+    SERVER_GetSession(NULL, &pCurSession, fd, -1);
     if(NULL == pCurSession)
     {
         pthread_mutex_unlock(&g_SessionLock);
@@ -944,8 +925,10 @@ G_STATUS SERVER_CheckAllUserStatus(MsgPkt_t *pMsgPkt)
     session_t *pCurSession;
     int WriteDataLength;
     MsgPkt_t MsgPkt;
+    _BOOL_ flag;
 
     MSG_InitMsgPkt(&MsgPkt);
+    flag = FALSE;
 
     pthread_mutex_lock(&g_SessionLock);
     pPrevSession = &g_HeadSession;
@@ -955,33 +938,18 @@ G_STATUS SERVER_CheckAllUserStatus(MsgPkt_t *pMsgPkt)
     {
         if(0 > pCurSession->fd)
         {
-            if(g_pTailSession == pCurSession)
-            {
-                g_pTailSession = pPrevSession;
-            }
-            
-            pPrevSession->pNext = pCurSession->pNext;
-            //LOG_DEBUG("[Status][%s][%s]: Offline\n", pCurSession->UserInfo.UserName, pCurSession->ip);
-            free(pCurSession);
+            flag = TRUE;
+            SERVER_FreeSession(pPrevSession, pCurSession, FALSE);
             pCurSession = pPrevSession->pNext;
-            g_HeadSession.fd--;
             continue;
         }
         
         WriteDataLength = write(pCurSession->fd, &MsgPkt, sizeof(MsgPkt_t));
         if(sizeof(MsgPkt_t) != WriteDataLength)
         {
-            if(g_pTailSession == pCurSession)
-            {
-                g_pTailSession = pPrevSession;
-            }
-            
-            pPrevSession->pNext = pCurSession->pNext;
-            close(pCurSession->fd);
-            //LOG_DEBUG("[Status][%s][%s]: Offline\n", pCurSession->UserInfo.UserName, pCurSession->ip);
-            free(pCurSession);
+            flag = TRUE;
+            SERVER_FreeSession(pPrevSession, pCurSession, FALSE);
             pCurSession = pPrevSession->pNext;
-            g_HeadSession.fd--;
         }
         else
         {
@@ -989,6 +957,11 @@ G_STATUS SERVER_CheckAllUserStatus(MsgPkt_t *pMsgPkt)
             pPrevSession = pCurSession;
             pCurSession = pCurSession->pNext;
         }
+    }
+
+    if(TRUE == flag)
+    {
+        SERVER_UpdateMaxFd(&g_MaxFd);
     }
     
     pthread_mutex_unlock(&g_SessionLock);
@@ -1044,8 +1017,8 @@ static G_STATUS SERVER_InitServerFile(void)
 static G_STATUS SERVER_InitGlobalVaribles(void)
 {
     g_ServerLiveFlag = 0;
+    g_ServerSocketFd = 0;
     g_pTailSession = &g_HeadSession;
-    
     memset(&g_HeadSession, 0, sizeof(session_t));
     
     return STAT_OK;
@@ -1122,9 +1095,9 @@ static uint64_t SERVER_CreateUserID(void)
 /*
  *  @Briefs: Add user
  *  @Return: Competion code
- *  @Note: If flag is equare to 1, it means the user is an administrator
+ *  @Note: If flag is equare to TRUE, it means the user is an administrator
  */
-static COMPLETION_CODE SERVER_AddUser(const char *pUserName, const char *pPassword, char flag)
+static COMPLETION_CODE SERVER_AddUser(const char *pUserName, const char *pPassword, _BOOL_ flag)
 {
     char SmallBuf[SMALL_BUF_SIZE];
     int fd;
@@ -1140,7 +1113,7 @@ static COMPLETION_CODE SERVER_AddUser(const char *pUserName, const char *pPasswo
     }
     
     UserID = SERVER_CreateUserID();
-    if(1 == flag)
+    if(TRUE == flag)
     {
         UserID |= (uint64_t)0x1 << 63; //Set as admin permission
     }
@@ -1186,9 +1159,9 @@ static COMPLETION_CODE SERVER_AddUser(const char *pUserName, const char *pPasswo
 /*
  *  @Briefs: Delete user
  *  @Return: Competion code
- *  @Note: If flag is equare to 1, it means the user is an administrator
+ *  @Note: If flag is TRUE, it means the user is an administrator
  */
-static COMPLETION_CODE SERVER_DelUser(const char *pUserName, char flag)
+static COMPLETION_CODE SERVER_DelUser(const char *pUserName, _BOOL_ flag)
 {
     char SmallBuf[SMALL_BUF_SIZE];
     int fd;
@@ -1221,7 +1194,7 @@ static COMPLETION_CODE SERVER_DelUser(const char *pUserName, char flag)
 
     if(UserID >> 63) //User is an admin
     {
-        if(1 != flag) //If not the root to execute this operation
+        if(TRUE != flag) //If not the root to execute this operation
         {
             LOG_ERROR("[Del user][%s] Permission denied\n", pUserName);
             return CC_PERMISSION_DENIED;
@@ -1267,14 +1240,14 @@ static G_STATUS SERVER_CreateSession(int fd, struct sockaddr_in *pClientSocketAd
     g_pTailSession = pNewSession;
     g_HeadSession.fd++;
     
-    FD_SET(fd, g_pPrevFds);
-    if(*g_pMaxFd < fd)
+    FD_SET(fd, &g_PrevFds);
+    if(g_MaxFd < fd)
     {
-        *g_pMaxFd = fd;
-        
+        g_MaxFd = fd;
     }
     
-    LOG_DEBUG("[Create session] New session %s, fd=%d\n", pNewSession->ip, fd);
+    LOG_DEBUG("[Create session] New session %s, fd=%d, session addr: 0x%lx\n", pNewSession->ip, fd, 
+        (int64_t)pNewSession);
     
     pthread_mutex_unlock(&g_SessionLock);
     
@@ -1284,63 +1257,54 @@ static G_STATUS SERVER_CreateSession(int fd, struct sockaddr_in *pClientSocketAd
 /*
  *  @Briefs: Close the session and free memory
  *  @Return: STAT_OK / STAT_ERR
- *  @Note: If fd is equare to -1, it will find the session based on UserID
+ *  @Note: If fd is negative, it will find the session based on UserID
  */
 static G_STATUS SERVER_CloseSession(int fd, uint64_t UserID)
 {
     session_t *pPrevSession;
     session_t *pCurSession;
-    int CurFd;
 
+    pPrevSession = NULL;
+    pCurSession = NULL;
     pthread_mutex_lock(&g_SessionLock);
-    pPrevSession = &g_HeadSession;
-    pCurSession = g_HeadSession.pNext;
 
-    pCurSession = SERVER_GetSession(fd, UserID);
-    if(NULL == pCurSession)
+    SERVER_GetSession(&pPrevSession, &pCurSession, fd, UserID);
+    if((NULL == pPrevSession) || (NULL == pCurSession))
     {
         pthread_mutex_unlock(&g_SessionLock);
         return STAT_ERR;
     }
-    
-    if(g_pTailSession == pCurSession)
-    {
-        g_pTailSession = pPrevSession;
-    }
-    
-    pPrevSession->pNext = pCurSession->pNext;
-    CurFd = pCurSession->fd;
-    close(pCurSession->fd);
-    free(pCurSession);
-    //pCurSession = pPrevSession->pNext;
-    g_HeadSession.fd--;
-    
-    FD_CLR(CurFd, g_pPrevFds);
-    if(CurFd == *g_pMaxFd)
-    {
-        SERVER_UpdateMaxFd(g_pMaxFd);
-    }
 
+    LOG_DEBUG("[SERVER close session] CurSession: 0x%lx\n", (int64_t)pCurSession);
+    
+    SERVER_FreeSession(pPrevSession, pCurSession, TRUE);
+    
     pthread_mutex_unlock(&g_SessionLock);
 
     return STAT_OK;
 }
 
 /*
- *  @Briefs: Calculate the max fd value according to all sessions
- *  @Return: Return the session pointer if success, otherwise return NULL
- *  @Note:   Must lock session before invoke and unlock after invoke
+ *  @Briefs: Find out the session
+ *  @Return: None
+ *  @Note:   1. Must lock session before invoke and unlock after invoke
+ *           2. Set value only if ppCurSession or ppPrevSession is not NULL
+ *           3. Find out session according fd when fd is not negative, otherwise according to
+ *              UserID to locate the session
  */
-static session_t *SERVER_GetSession(int fd, uint64_t UserID)
+static void SERVER_GetSession(session_t **ppPrevSession, session_t **ppCurSession, 
+    int fd, uint64_t UserID)
 {
     session_t *pCurSession;
-    
+    session_t *pPrevSession;
+
     pCurSession = &g_HeadSession;
 
     if(0 < fd)
     {
         while(1)
         {
+            pPrevSession = pCurSession;
             pCurSession = pCurSession->pNext;
             if(NULL == pCurSession)
                 break;
@@ -1353,6 +1317,7 @@ static session_t *SERVER_GetSession(int fd, uint64_t UserID)
     {
         while(1)
         {
+            pPrevSession = pCurSession;
             pCurSession = pCurSession->pNext;
             if(NULL == pCurSession)
                 break;
@@ -1361,8 +1326,56 @@ static session_t *SERVER_GetSession(int fd, uint64_t UserID)
                 break;
         }
     }
+
+    if(NULL != ppPrevSession)
+    {
+        *ppPrevSession = pPrevSession;
+        LOG_DEBUG("[SERVER get session] PrevSession: 0x%lx\n", (int64_t)*ppPrevSession);
+    }
+
+    if(NULL != ppCurSession)
+    {
+        *ppCurSession = pCurSession;
+        LOG_DEBUG("[SERVER get session] CurSession: 0x%lx\n", (int64_t)*ppCurSession);
+    }
+}
+
+/*
+ *  @Briefs: Free the memory of session and connect the previous session with the next session
+ *  @Return: None
+ *  @Note:   1. Must lock session before invoke and unlock after invoke
+ *           2. If flag is TRUE, it means it needs to update MaxFd
+ */
+static void SERVER_FreeSession(session_t *pPrevSession, session_t *pCurSession, _BOOL_ flag)
+{
+    int fd;
+
+    if((NULL == pPrevSession) || (NULL == pCurSession))
+        return;
+
+    if(g_pTailSession == pCurSession)
+    {
+        g_pTailSession = pPrevSession;
+    }
     
-    return pCurSession;
+    pPrevSession->pNext = pCurSession->pNext;
+    fd = pCurSession->fd;
+    if(0 <= fd)
+    {
+        close(fd);
+    }
+
+    LOG_DEBUG("[SERVER free session] session addr: 0x%lx\n", (int64_t)pCurSession);
+    free(pCurSession);
+    g_HeadSession.fd--;
+    
+    FD_CLR(fd, &g_PrevFds);
+    if((TRUE == flag) && (fd == g_MaxFd))
+    {
+        SERVER_UpdateMaxFd(&g_MaxFd);
+    }
+    
+    LOG_DEBUG("[SERVER free session][fd=%d] success\n", fd);
 }
 
 /*
@@ -1370,7 +1383,7 @@ static session_t *SERVER_GetSession(int fd, uint64_t UserID)
  *  @Return: None
  *  @Note:   Must lock session before invoke and unlock after invoke
  */
-static void SERVER_UpdateMaxFd(int *pMaxFd)
+static void SERVER_UpdateMaxFd(__IO int *pMaxFd)
 {
     int MaxFd;
     session_t *pCurSession;
