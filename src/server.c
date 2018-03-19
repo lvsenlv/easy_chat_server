@@ -97,6 +97,7 @@ void *SERVER_ServerTask(void *pArg)
     struct sockaddr_in ClientSocketAddr;
     int ReadDataLength;
     MsgPkt_t MsgPkt;
+    MsgDataRes_t *pResMsgPkt;
     session_t *pPrevSession;
     session_t *pCurSession;
     int TimeCount;
@@ -109,6 +110,7 @@ void *SERVER_ServerTask(void *pArg)
     g_ServerSocketFd = ServerSocketFd;
     
     MSG_InitMsgPkt(&MsgPkt);
+    pResMsgPkt = (MsgDataRes_t *)&MsgPkt.data;
     TimeInterval.tv_usec = 0;
     g_MaxFd = ServerSocketFd;
     FD_ZERO(&g_PrevFds);
@@ -157,10 +159,9 @@ void *SERVER_ServerTask(void *pArg)
 
             SERVER_CreateSession(ClientSocketFd, &ClientSocketAddr);
 
-            MsgPkt.cmd = MSG_CMD_SEND_TO_USER;
+            MsgPkt.cmd = MSG_CMD_SEND_RES;
             MsgPkt.fd = ClientSocketFd;
-            MsgPkt.CCFlag = 0;
-            MSG_Set32BitData(&MsgPkt, MSG_DATA_OFFSET_CC, CC_NORMAL);
+            pResMsgPkt->CC = CC_NORMAL;
             MSG_PostMsg(&MsgPkt);
             
             continue;
@@ -294,7 +295,7 @@ G_STATUS SERVER_ROOT_UserLogin(MsgPkt_t *pMsgPkt)
     session_t *pCurSession;
 
     pVerifyData = (MsgDataVerifyIdentity_t *)pMsgPkt->data;
-    pResMsgData = (MsgDataRes_t *)&(ResMsgPkt.data);
+    pResMsgData = (MsgDataRes_t *)&ResMsgPkt.data;
     
     ResMsgPkt.cmd = MSG_CMD_SEND_RES;
     ResMsgPkt.fd = pMsgPkt->fd;
@@ -811,7 +812,6 @@ G_STATUS SERVER_UserLogin(MsgPkt_t *pMsgPkt)
     LOG_INFO("[%s][%s] Login\n", pVerifyData->UserName, pCurSession->ip);
     pthread_mutex_unlock(&g_SessionLock);
     
-    MSG_Set64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID, UserID);
     pResMsgData->UserID = UserID;
     MSG_PostMsg(&ResMsgPkt);
     
@@ -1031,7 +1031,7 @@ static COMPLETION_CODE SERVER_AddUser(const char *pUserName, const char *pPasswo
         LOG_WARNING("[Add user][%s] User has been exist\n", pUserName);
         return CC_USER_HAS_BEEN_EXIST;
     }
-
+    
     if(0 != mkdir(SmallBuf, 0600))
     {
         LOG_ERROR("[Add user][%s] mkdir(): %s\n", pUserName, strerror(errno));
@@ -1142,10 +1142,12 @@ static COMPLETION_CODE SERVER_DelUser(const char *pUserName, _BOOL_ flag)
         }
     }
     
-    if(0 != unlink(SmallBuf))
+    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_ROOT_DIR, pUserName);
+    
+    if(STAT_OK != RemoveDirectory(SmallBuf))
     {
-        LOG_WARNING("[Del user][%s] unlink(): %s\n", pUserName, strerror(errno));
-        return CC_FAIL_TO_UNLINK;
+        LOG_WARNING("[Del user][%s] Fail to delete dir: %s\n", pUserName, SmallBuf);
+        return CC_FAIL_TO_RM_DIR;
     }
 
     SERVER_CloseSession(-1, UserID);

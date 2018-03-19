@@ -39,7 +39,7 @@ G_STATUS LOG_SysLog(char *pFormat, ...)
     if(0 >= length)
         return STAT_ERR;
 
-    fp = fopen(LOG_SYSLOG_FILE, LOG_OPEN_FORMAT);
+    fp = fopen(LOG_SYSLOG_FILE, "a+");
     if(NULL == fp)
         return STAT_ERR;
 
@@ -91,8 +91,10 @@ G_STATUS LOG_DispLogTime(FILE *fp)
     
     ti = time(NULL);
     TimeInfo = localtime(&ti);
-    fprintf(fp, "[%4d-%02d-%02d %02d:%02d:%02d] ", TimeInfo->tm_year+1900, TimeInfo->tm_mon, 
-        TimeInfo->tm_mday, TimeInfo->tm_hour, TimeInfo->tm_min, TimeInfo->tm_sec);
+//    fprintf(fp, "[%4d-%02d-%02d %02d:%02d:%02d] ", TimeInfo->tm_year+1900, TimeInfo->tm_mon, 
+//        TimeInfo->tm_mday, TimeInfo->tm_hour, TimeInfo->tm_min, TimeInfo->tm_sec);
+    fprintf(fp, "[%02d-%02d %02d:%02d:%02d] ", TimeInfo->tm_mon, TimeInfo->tm_mday, 
+        TimeInfo->tm_hour, TimeInfo->tm_min, TimeInfo->tm_sec);
         
     return STAT_OK;
 }

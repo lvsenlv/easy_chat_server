@@ -15,8 +15,18 @@
 #include <arpa/inet.h>
 #include <sys/time.h>
 
+#ifdef __ROOT_LOGIN
+#define LOGIN_USER_NAME                     "lvsenlv"
+#define LOGIN_PASSWORD                      "linuxroot"
+#define LOGIN_USER_ID                       4884
+#else
+#define LOGIN_USER_NAME                     "admin01"
+#define LOGIN_PASSWORD                      "admin123"
+#endif
+
 G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char ch);
 G_STATUS GetResponse(MsgPkt_t *pMsgPkt, int fd, int timeout);
+void DispHelpInfo(void);
  
 int g_ResFd;
  
@@ -28,6 +38,12 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    if(0 == strcmp("-h", argv[1]))
+    {
+        DispHelpInfo();
+        return 0;
+    }
+
     InitErrorCodeTable();
 
     int ClientSocketFd = 0;
@@ -37,7 +53,9 @@ int main(int argc, char **argv)
     char buf[BUF_SIZE] = {0};
     int SendDataLength;
     MsgPkt_t MsgPkt;
-    COMPLETION_CODE code;
+    MsgPkt_t ResMsgPkt;
+    MsgDataVerifyIdentity_t *pVerifyData;
+    MsgDataRes_t *pResMsgData;
     int retry;
     
     ClientSocketFd = socket(AF_INET, SOCK_STREAM, 0);
@@ -63,7 +81,19 @@ int main(int argc, char **argv)
     }
 
     memset(&MsgPkt, 0, sizeof(MsgPkt_t));
+    memset(&ResMsgPkt, 0, sizeof(MsgPkt_t));
+    pVerifyData = (MsgDataVerifyIdentity_t *)&MsgPkt.data;
+    pResMsgData = (MsgDataRes_t *)&ResMsgPkt.data;
+
+#ifdef __ROOT_LOGIN
+    MsgPkt.cmd = MSG_CMD_ROOT_LOGIN;
+    pVerifyData->UserID = LOGIN_USER_ID;
+#else
+    MsgPkt.cmd = MSG_CMD_USER_LOGIN;
+#endif
     MsgPkt.CCFlag = 1;
+    memcpy(pVerifyData->UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
+    memcpy(pVerifyData->password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
     
     res = connect(ClientSocketFd, (struct sockaddr *)&ClientSocketAddr, sizeof(struct sockaddr_in));
     if(0 > res)
@@ -74,19 +104,12 @@ int main(int argc, char **argv)
     
     for(retry = 1; retry <= 3; retry++)
     {
-        if(STAT_OK != GetResponse(&MsgPkt, ClientSocketFd, 1))
+        if(STAT_OK != GetResponse(&ResMsgPkt, ClientSocketFd, 1))
             continue;
         
-        g_ResFd = MsgPkt.fd;
+        g_ResFd = ResMsgPkt.fd;
+        MsgPkt.fd = ResMsgPkt.fd;
         printf("Server response fd: %d\n", g_ResFd);
-        
-//        MsgPkt.cmd = MSG_CMD_ROOT_LOGIN;
-//        MSG_Set64BitData(&MsgPkt, MSG_DATA_OFFSET_USER_ID, 0x1314);
-//        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_USER_NAME, "lvsenlv", 7);
-//        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_PASSWORD, "linuxroot", 9);
-        MsgPkt.cmd = MSG_CMD_USER_LOGIN;
-        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_USER_NAME, "admin01", 7);
-        MSG_SetStringData(&MsgPkt, MSG_DATA_OFFSET_PASSWORD, "admin01", 7);
         
         SendDataLength = write(ClientSocketFd, &MsgPkt, sizeof(MsgPkt_t));
         if(sizeof(MsgPkt_t) != SendDataLength)
@@ -95,13 +118,12 @@ int main(int argc, char **argv)
             return -1;
         }
         
-        if(STAT_OK != GetResponse(&MsgPkt, ClientSocketFd, 1))
+        if(STAT_OK != GetResponse(&ResMsgPkt, ClientSocketFd, 1))
             continue;
         
-        code = MSG_Get32BitData(&MsgPkt, MSG_DATA_OFFSET_CC);
-        if(CC_NORMAL != code)
+        if(CC_NORMAL != pResMsgData->CC)
         {
-            printf("%s\n", GetErrorDetails(code));
+            printf("%s\n", GetErrorDetails(pResMsgData->CC));
             return -1;
         }
             
@@ -125,7 +147,7 @@ int main(int argc, char **argv)
             if(STAT_OK != FillMsgPkt(&MsgPkt, buf[0]))
                 continue;
 
-            SendDataLength = write(ClientSocketFd, (char *)&MsgPkt, sizeof(MsgPkt_t));
+            SendDataLength = write(ClientSocketFd, &MsgPkt, sizeof(MsgPkt_t));
             if(0 < SendDataLength)
             {
                 printf("Success sending message\n");
@@ -139,15 +161,14 @@ int main(int argc, char **argv)
             break;
         }
 
-        if(STAT_OK != GetResponse(&MsgPkt, ClientSocketFd, 1))
+        if(STAT_OK != GetResponse(&ResMsgPkt, ClientSocketFd, 1))
         {
             printf("Server no response\n");
             continue;
         }
             
-        code = MSG_Get32BitData(&MsgPkt, MSG_DATA_OFFSET_CC);
-        if(CC_NORMAL != code)
-            printf("%s\n", GetErrorDetails(code));
+        if(CC_NORMAL != pResMsgData->CC)
+            printf("%s\n", GetErrorDetails(pResMsgData->CC));
         else
             printf("Success\n");
     }
@@ -157,39 +178,61 @@ int main(int argc, char **argv)
 
 G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
 {
+    MsgDataAddUser_t *pMsgDataAddUser;
+    MsgDataDelUser_t *pMsgDataDelUser;
+
     memset(pMsgPkt, 0, sizeof(MsgPkt_t));
     pMsgPkt->CCFlag = 1;
     pMsgPkt->fd = g_ResFd;
-
+    
     switch(choice)
     {
         case '1':
+#ifdef __ROOT_LOGIN
             pMsgPkt->cmd = MSG_CMD_ROOT_ADD_ADMIN;
-            MSG_Set64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID, 0x1314);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, "lvsenlv", 7);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, "linuxroot", 9);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_USER_NAME, "admin01", 7);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_PASSWORD, "admin01", 7);
+            pMsgDataAddUser = (MsgDataAddUser_t *)pMsgPkt->data;
+            pMsgDataAddUser->VerifyData.UserID = LOGIN_USER_ID;
+            memcpy(pMsgDataAddUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
+            memcpy(pMsgDataAddUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
+            memcpy(pMsgDataAddUser->AddUserName, "admin01", 7);
+            memcpy(pMsgDataAddUser->AddPassword, "admin123", 8);
+#else
+            pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
+            printf("No root login\n");
+#endif
             break;
         case '2':
+#ifdef __ROOT_LOGIN
             pMsgPkt->cmd = MSG_CMD_ROOT_DEL_ADMIN;
-            MSG_Set64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID, 0x1314);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, "lvsenlv", 7);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, "linuxroot", 9);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_DEL_USER_NAME, "admin01", 7);
+            pMsgDataDelUser = (MsgDataDelUser_t *)pMsgPkt->data;
+            pMsgDataDelUser->VerifyData.UserID = LOGIN_USER_ID;
+            memcpy(pMsgDataDelUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
+            memcpy(pMsgDataDelUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
+            memcpy(pMsgDataDelUser->DelUserName, "admin01", 7);
+#else
+            pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
+            printf("No root login\n");
+#endif
             break;
         case '3':
             pMsgPkt->cmd = MSG_CMD_ADMIN_ADD_USER;
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, "admin01", 7);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, "admin01", 7);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_USER_NAME, "user01", 6);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_ADD_PASSWORD, "user01", 6);
+            pMsgDataAddUser = (MsgDataAddUser_t *)pMsgPkt->data;
+            memcpy(pMsgDataAddUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
+            memcpy(pMsgDataAddUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
+            memcpy(pMsgDataAddUser->AddUserName, "user01", 6);
+            memcpy(pMsgDataAddUser->AddPassword, "user123", 7);
+            break;
+        case '4':
+            pMsgPkt->cmd = MSG_CMD_ADMIN_DEL_USER;
+            pMsgDataDelUser = (MsgDataDelUser_t *)pMsgPkt->data;
+            memcpy(pMsgDataDelUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
+            memcpy(pMsgDataDelUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
+            memcpy(pMsgDataDelUser->DelUserName, "user01", 7);
             break;
         case 'q':
-            pMsgPkt->cmd = MSG_CMD_USER_LOGOUT;
-            MSG_Set64BitData(pMsgPkt, MSG_DATA_OFFSET_USER_ID, 0x1314);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_USER_NAME, "lvsenlv", 7);
-            MSG_SetStringData(pMsgPkt, MSG_DATA_OFFSET_PASSWORD, "linuxroot", 9);
+            break;
+        case 'h':
+            DispHelpInfo();
             break;
         default:
             return STAT_ERR;
@@ -260,3 +303,10 @@ G_STATUS GetResponse(MsgPkt_t *pMsgPkt, int fd, int timeout)
     return STAT_OK;
 }
 
+void DispHelpInfo(void)
+{
+    printf("1: Add admin\n");
+    printf("2: Del admin\n");
+    printf("3: Add user\n");
+    printf("4: Del user\n");
+}

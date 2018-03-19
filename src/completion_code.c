@@ -11,6 +11,7 @@ char *g_CompletionCodeTable[CC_MAX];
 
 void InitErrorCodeTable(void)
 {
+    g_CompletionCodeTable[CC_NORMAL]                    = "Normal";
     g_CompletionCodeTable[CC_INVALID_FD]                = "Invalid fd value";
     g_CompletionCodeTable[CC_PERMISSION_DENIED]         = "Permission denied";
     g_CompletionCodeTable[CC_USER_HAS_BEEN_EXIST]       = "User has been exist";

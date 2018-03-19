@@ -46,9 +46,11 @@ typedef     unsigned long long                  uint64_t;
 #include <sys/stat.h>
 
 #ifdef __LINUX
+#define     DIR_DELIMITER                       '/'
 #define     GetFileInfo(name, info)             lstat(name, info)
 typedef struct stat                             stat_t;
 #elif defined __WINDOWS
+#define     DIR_DELIMITER                       '\\'
 #define     GetFileInfo(name, info)             _stati64(name, info)
 typedef struct _stati64                         stat_t;
 #endif
@@ -133,6 +135,7 @@ typedef struct ArgInfoStruct{
 }ArgInfo_t;
 
 G_STATUS CreateFile(const char *pFileName, mode_t mode);
+G_STATUS RemoveDirectory(const char *pFolderName);
 int GetFileSize(const char *pFileName);
 void ExitDaemon(void);
 

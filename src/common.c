@@ -10,6 +10,9 @@
 #include <unistd.h>
 #include <time.h>
 #include <fcntl.h>
+#include <dirent.h>
+#include <string.h>
+#include <errno.h>
 
 #ifndef __DISABLE_COMPILE_INFO
     #ifdef __LINUX
@@ -54,6 +57,74 @@ G_STATUS CreateFile(const char *pFileName, mode_t mode)
         return STAT_ERR;
 
     close(fd);
+    return STAT_OK;
+}
+
+/*
+ *  @Briefs: Search files with all format in pFolderName and delete it
+ *  @Return: STAT_OK / STAT_ERR
+ *  @Note:   None
+ */
+G_STATUS RemoveDirectory(const char *pFolderName)
+{
+    DIR *pDir;
+    struct dirent *pEntry;
+    char FileName[1024];
+    stat_t FileInfo;
+    
+    pDir = opendir(pFolderName);
+    if(NULL == pDir)
+        return STAT_ERR;
+    
+    while(1)
+    {
+        pEntry = readdir(pDir);
+        if(NULL == pEntry)
+            break;
+
+        //Ignore ".", ".."
+        if('.' == pEntry->d_name[0])
+        {
+            if('\0' == pEntry->d_name[1])
+                continue;
+            else if(('.' == pEntry->d_name[1]) && ('\0' == pEntry->d_name[2]))
+                continue;
+        }
+        
+        snprintf(FileName, sizeof(FileName), "%s%c%s", pFolderName, DIR_DELIMITER, pEntry->d_name);
+        FileName[sizeof(FileName)-1] = '\0';
+
+        if(0 != GetFileInfo(FileName, &FileInfo))
+            continue;
+        
+#ifdef __LINUX
+        if(DT_DIR == pEntry->d_type)
+#elif defined __WINDOWS
+        if(FileInfo.st_mode & S_IFDIR)
+#endif
+        {
+            RemoveDirectory(FileName);
+            continue;
+        }
+#ifdef __LINUX
+        else if(DT_REG == pEntry->d_type)
+#elif defined __WINDOWS
+        else if((FileInfo.st_mode & S_IFREG) || (FileInfo.st_mode & S_IFLNK))
+#endif
+        {
+            unlink(FileName);
+            continue;
+        }
+        else
+        {
+            unlink(FileName);
+            continue;
+        }
+    }
+    
+    closedir(pDir);
+    rmdir(pFolderName);
+    
     return STAT_OK;
 }
 

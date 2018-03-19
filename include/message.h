@@ -47,6 +47,7 @@ typedef enum {
     MSG_CMD_ROOT_ADD_ADMIN,
     MSG_CMD_ROOT_DEL_ADMIN,
     MSG_CMD_ADMIN_ADD_USER,
+    MSG_CMD_ADMIN_DEL_USER,
     MSG_CMD_USER_LOGIN,
     MSG_CMD_USER_LOGOUT,
     MSG_CMD_CHECK_ALL_USER_STATUS,
@@ -102,6 +103,7 @@ G_STATUS MSG_GetResponse(MsgPkt_t *pMsgPkt, int timeout);
 //Static inline functions
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+#if 0
 static inline void MSG_Set32BitData(MsgPkt_t *pMsgPkt, int offset, int data)
 {
     int *ptr = (int *)&pMsgPkt->data[offset];
@@ -160,5 +162,6 @@ static inline void MSG_SetStringData(MsgPkt_t *pMsgPkt, int offset,
 
     *ptr = '\0';
 }
+#endif
 
 #endif

@@ -27,6 +27,7 @@ static G_STATUS MSG_CreateMsgQueue(void);
 static G_STATUS MSG_InitGlobalVariables(void);
 static G_STATUS MSG_ProcessMsg(MsgPkt_t *pMsgPkt);
 static G_STATUS MSG_SendToUser(MsgPkt_t *pMsgPkt);
+static G_STATUS MSG_SendResponse(MsgPkt_t *pMsgPkt);
 
 #ifdef __DEBUG
 char *g_pCmdDetail[MSG_CMD_MAX];
@@ -310,11 +311,20 @@ static G_STATUS MSG_InitGlobalVariables(void)
     g_MsgTaskLiveFlag = 0;
 
 #ifdef __DEBUG
+    int i;
+
+    for(i = 0; i < MSG_CMD_MAX; i++)
+    {
+        g_pCmdDetail[i] = "Unspecified";
+    }
+    
     g_pCmdDetail[MSG_CMD_SEND_TO_USER]              = "send to user";
+    g_pCmdDetail[MSG_CMD_SEND_RES]                  = "Send response";
     g_pCmdDetail[MSG_CMD_ROOT_LOGIN]                = "root login";
     g_pCmdDetail[MSG_CMD_ROOT_ADD_ADMIN]            = "add admin";
     g_pCmdDetail[MSG_CMD_ROOT_DEL_ADMIN]            = "del admin";
     g_pCmdDetail[MSG_CMD_ADMIN_ADD_USER]            = "add user";
+    g_pCmdDetail[MSG_CMD_ADMIN_DEL_USER]            = "del user";
     g_pCmdDetail[MSG_CMD_USER_LOGIN]                = "user login";
     g_pCmdDetail[MSG_CMD_USER_LOGOUT]               = "user logout";
     g_pCmdDetail[MSG_CMD_CHECK_ALL_USER_STATUS]     = "check status";
@@ -331,6 +341,9 @@ static G_STATUS MSG_ProcessMsg(MsgPkt_t *pMsgPkt)
         case MSG_CMD_SEND_TO_USER:
             MSG_SendToUser(pMsgPkt);
             break;
+        case MSG_CMD_SEND_RES:
+            MSG_SendResponse(pMsgPkt);
+            break;
 #ifdef __SERVER
         case MSG_CMD_USER_LOGIN:
             SERVER_UserLogin(pMsgPkt);
@@ -344,6 +357,9 @@ static G_STATUS MSG_ProcessMsg(MsgPkt_t *pMsgPkt)
         case MSG_CMD_ADMIN_ADD_USER:
             SERVER_ADMIN_AddUser(pMsgPkt);
             break;
+        case MSG_CMD_ADMIN_DEL_USER:
+            SERVER_ADMIN_DelUser(pMsgPkt);
+            break;
         case MSG_CMD_ROOT_LOGIN:
             SERVER_ROOT_UserLogin(pMsgPkt);
             break;
@@ -352,8 +368,10 @@ static G_STATUS MSG_ProcessMsg(MsgPkt_t *pMsgPkt)
             break;
         case MSG_CMD_ROOT_DEL_ADMIN:
             SERVER_ROOT_DelAdmin(pMsgPkt);
+            break;
 #endif
         default:
+            LOG_DEBUG("[MSG process msg] Unspecified command\n");
             break;
     }
     
@@ -361,6 +379,20 @@ static G_STATUS MSG_ProcessMsg(MsgPkt_t *pMsgPkt)
 }
 
 static G_STATUS MSG_SendToUser(MsgPkt_t *pMsgPkt)
+{
+    if(0 > pMsgPkt->fd)
+        return STAT_ERR;
+
+    int WriteDataLength;
+
+    WriteDataLength = write(pMsgPkt->fd, (char *)pMsgPkt, sizeof(MsgPkt_t));
+    if(sizeof(MsgPkt_t) != WriteDataLength)
+        return STAT_ERR;
+    
+    return STAT_OK;
+}
+
+static G_STATUS MSG_SendResponse(MsgPkt_t *pMsgPkt)
 {
     if(0 > pMsgPkt->fd)
         return STAT_ERR;

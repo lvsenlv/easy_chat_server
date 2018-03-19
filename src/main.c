@@ -18,11 +18,11 @@
 #include <errno.h>
 #include <sys/wait.h>
 
-#define DAEMON_LOG_FILE                     "/var/log/easy_chat_daemon"
-#define DAEMON_QUEUE                        "/var/easy_chat_queque"
-#define MONITOR_SERVER_TIME_INTERVAL        5 //Unit: second
-#define PROCESS_KEEP_ALIVE_TIME_INTERVAL    5
-#define PROCESS_HANDSHAKE_SYMBOL            'Y'
+#define DAEMON_LOG_FILE                         "/var/log/easy_chat_daemon"
+#define DAEMON_QUEUE                            "/var/easy_chat_queque"
+#define PROCESS_KEEP_ALIVE_TIME_INTERVAL        5  //Unit: second
+#define MONITOR_SERVER_PROCESS_TIME_INTERVAL    (PROCESS_KEEP_ALIVE_TIME_INTERVAL+2)
+#define PROCESS_HANDSHAKE_SYMBOL                'Y'
 
 FILE *g_DaemonLogFp;
 
@@ -244,7 +244,7 @@ static G_STATUS MonitorServerProcess(int ChildProcessID, int *pServerStartCount)
     {
         FD_ZERO(&fds);
         FD_SET(fd, &fds);
-        TimeInterval.tv_sec = MONITOR_SERVER_TIME_INTERVAL;
+        TimeInterval.tv_sec = MONITOR_SERVER_PROCESS_TIME_INTERVAL;
         
         res = select(fd+1, &fds, NULL, NULL, &TimeInterval);
         if(0 > res)
@@ -311,10 +311,10 @@ static G_STATUS ServerMain(int fd)
 
     if(STAT_OK != MSG_CreateTask(&MsgTaskID))
         return STAT_ERR;
-
+    
     if(STAT_OK != SERVER_CreateTask(&ServerTaskID))
         return STAT_ERR;
-
+    
     TimeCount = 0;
     MsgTaskLastRestartTime = 0;
     MsgTaskConsecutiveRestartCount = 0;
