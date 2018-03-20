@@ -1111,7 +1111,7 @@ static COMPLETION_CODE SERVER_DelUser(const char *pUserName, _BOOL_ flag)
     if(0 != access(SmallBuf, F_OK))
     {
         snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_ROOT_DIR, pUserName);
-        rmdir(SmallBuf);
+        RemoveDirectory(SmallBuf);
         LOG_WARNING("[Del user][%s] User does not exist\n", pUserName);
         return CC_USER_DOES_NOT_EXIST;
     }

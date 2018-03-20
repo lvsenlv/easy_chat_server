@@ -203,7 +203,7 @@ int main(int argc, char **argv)
 
 void CHLD_SignalHandle(int SignalNum)
 {
-    DAEMON_LOG("Catch child process crash signal\n");
+    DAEMON_LOG("Detect CHLD signal\n");
     if(-1 == wait(NULL)) //Avoid zombie process
     {
         DAEMON_LOG("wait(): %s\n", strerror(errno));
