@@ -30,6 +30,8 @@ static G_STATUS SERVER_CreateSession(int fd, struct sockaddr_in *pClientSocketAd
 static G_STATUS SERVER_CloseSession(int fd, uint64_t UserID);
 static COMPLETION_CODE SERVER_AddUser(const char *pUserName, const char *pPassword, _BOOL_ flag);
 static COMPLETION_CODE SERVER_DelUser(const char *pUserName, _BOOL_ flag);
+static COMPLETION_CODE SERVER_RenameUser(const char *pOldUserName, 
+    const char *pNewUserName, _BOOL_ flag);
 static void SERVER_GetSession(session_t **ppPrevSession, session_t **ppCurSession, int fd, uint64_t UserID);
 static void SERVER_FreeSession(session_t *pPrevSession , session_t *pCurSession, _BOOL_ flag);
 static void SERVER_UpdateMaxFd(__IO int *pMaxFd);
@@ -184,12 +186,14 @@ void *SERVER_ServerTask(void *pArg)
                 pCurSession = pCurSession->pNext;
                 continue;
             }
-
+            
             ReadDataLength = read(pCurSession->fd, (char *)&MsgPkt, sizeof(MsgPkt_t));
             if(0 > ReadDataLength)
             {
                 pthread_mutex_unlock(&g_SessionLock);
-                LOG_ERROR("[SERVER task] read(): %s\n", strerror(errno));
+                LOG_DEBUG("[SERVER task][%s] Fail to read: may be abnormal disconnection\n", pCurSession->ip);
+                SERVER_FreeSession(pPrevSession, pCurSession, TRUE);
+                pCurSession = pPrevSession->pNext;
                 break;
             }
             
@@ -430,6 +434,58 @@ G_STATUS SERVER_ROOT_DelAdmin(MsgPkt_t *pMsgPkt)
 
     return STAT_OK;
 }
+
+/*
+ *  @Briefs: Rename administrator
+ *  @Return: STAT_OK / STAT_ERR
+ *  @Note:   None
+ */
+G_STATUS SERVER_ROOT_RenameAdmin(MsgPkt_t *pMsgPkt)
+{
+    MsgPkt_t ResMsgPkt;
+    MsgDataRenameUser_t *pReqMsgData;
+    MsgDataRes_t *pResMsgData;
+    COMPLETION_CODE code;
+
+    pReqMsgData = (MsgDataRenameUser_t *)pMsgPkt->data;
+    pResMsgData = (MsgDataRes_t *)&ResMsgPkt.data;
+
+    if(0 != pMsgPkt->CCFlag)
+    {
+        ResMsgPkt.cmd = MSG_CMD_SEND_RES;
+        ResMsgPkt.fd = pMsgPkt->fd;
+        pResMsgData->CC = CC_NORMAL;
+    }
+    
+    if(STAT_OK != SERVER_ROOT_VerifyIdentity(&pReqMsgData->VerifyData))
+    {
+        if(0 != pMsgPkt->CCFlag)
+        {
+            pResMsgData->CC = CC_PERMISSION_DENIED;
+            MSG_PostMsg(&ResMsgPkt);
+        }
+        
+        return STAT_ERR;
+    }
+    
+    pReqMsgData->OldUserName[USER_NAME_MAX_LENGTH-1] = '\0';
+    pReqMsgData->NewUserName[USER_NAME_MAX_LENGTH-1] = '\0';
+    code = SERVER_RenameUser(pReqMsgData->OldUserName, pReqMsgData->NewUserName, TRUE);
+    
+    if(0 != pMsgPkt->CCFlag)
+    {
+        pResMsgData->CC = code;
+        MSG_PostMsg(&ResMsgPkt);
+    }
+
+    if(CC_NORMAL == code)
+    {
+        LOG_INFO("[Rename admin] Success %s -> %s\n", pReqMsgData->OldUserName, pReqMsgData->NewUserName);
+    }
+
+    return STAT_OK;
+}
+
 //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 //Root level function
 
@@ -1028,8 +1084,8 @@ static COMPLETION_CODE SERVER_AddUser(const char *pUserName, const char *pPasswo
     
     if(0 == access(SmallBuf, F_OK))
     {
-        LOG_WARNING("[Add user][%s] User has been exist\n", pUserName);
-        return CC_USER_HAS_BEEN_EXIST;
+        LOG_WARNING("[Add user][%s] User has been existed\n", pUserName);
+        return CC_USER_HAS_BEEN_EXISTED;
     }
     
     if(0 != mkdir(SmallBuf, 0600))
@@ -1142,6 +1198,8 @@ static COMPLETION_CODE SERVER_DelUser(const char *pUserName, _BOOL_ flag)
         }
     }
     
+    SERVER_CloseSession(-1, UserID);
+    
     snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_ROOT_DIR, pUserName);
     
     if(STAT_OK != RemoveDirectory(SmallBuf))
@@ -1150,7 +1208,84 @@ static COMPLETION_CODE SERVER_DelUser(const char *pUserName, _BOOL_ flag)
         return CC_FAIL_TO_RM_DIR;
     }
 
+    return CC_NORMAL;
+}
+
+/*
+ *  @Briefs: Rename user
+ *  @Return: Competion code
+ *  @Note: If flag is TRUE, it means the user is an administrator
+ */
+static COMPLETION_CODE SERVER_RenameUser(const char *pOldUserName, 
+    const char *pNewUserName, _BOOL_ flag)
+{
+    char SmallBuf[SMALL_BUF_SIZE];
+    char NewSmallBuf[SMALL_BUF_SIZE];
+    int fd;
+    uint64_t UserID;
+    int ReadDataLength;
+    
+    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_ROOT_DIR, pOldUserName);
+    snprintf(NewSmallBuf, sizeof(NewSmallBuf), "%s/%s", SERVER_ROOT_DIR, pNewUserName);
+    
+    if(0 != access(SmallBuf, F_OK))
+    {
+        LOG_WARNING("[Rename user][%s] User does not exist\n", pOldUserName);
+        return CC_USER_DOES_NOT_EXIST;
+    }
+
+    if(0 == access(NewSmallBuf, F_OK))
+    {
+        LOG_WARNING("[Rename user][%s] User has been existed\n", pNewUserName);
+        return CC_USER_HAS_BEEN_EXISTED;
+    }
+    
+    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s/%s", 
+        SERVER_ROOT_DIR, pOldUserName, SERVER_IDENTITY_FILE_NAME);
+    
+    if(0 != access(SmallBuf, F_OK))
+    {
+        snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_ROOT_DIR, pOldUserName);
+        RemoveDirectory(SmallBuf);
+        LOG_WARNING("[Rename user][%s] User does not exist\n", pOldUserName);
+        return CC_USER_DOES_NOT_EXIST;
+    }
+
+    fd = open(SmallBuf, O_RDONLY);
+    if(0 > fd)
+    {
+        LOG_ERROR("[Rename user][%s] open(): %s\n", pOldUserName, strerror(errno));
+        return CC_FAIL_TO_OPEN;
+    }
+
+    ReadDataLength = read(fd, &UserID, sizeof(UserID));
+    if(sizeof(UserID) != ReadDataLength)
+    {
+        close(fd);
+        LOG_ERROR("[Rename user][%s] read(): %s\n", pOldUserName, strerror(errno));
+        return CC_FAIL_TO_READ;
+    }
+    
+    close(fd);
+
+    if(UserID >> 63) //User is an admin
+    {
+        if(TRUE != flag) //If not the root to execute this operation
+        {
+            LOG_ERROR("[Rename user][%s] Permission denied\n", pOldUserName);
+            return CC_PERMISSION_DENIED;
+        }
+    }
+    
     SERVER_CloseSession(-1, UserID);
+    
+    snprintf(SmallBuf, sizeof(SmallBuf), "%s/%s", SERVER_ROOT_DIR, pOldUserName);
+    
+    if(0 != rename(SmallBuf, NewSmallBuf))
+    {
+        LOG_ERROR("[Rename user] rename(%s -> %s): %s\n", pOldUserName, pNewUserName, strerror(errno));
+        return CC_FAIL_TO_RN_DIR;
+    }
 
     return CC_NORMAL;
 }

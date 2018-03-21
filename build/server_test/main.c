@@ -15,6 +15,7 @@
 #include <arpa/inet.h>
 #include <sys/time.h>
 
+#define __ROOT_LOGIN
 #ifdef __ROOT_LOGIN
 #define LOGIN_USER_NAME                     "lvsenlv"
 #define LOGIN_PASSWORD                      "linuxroot"
@@ -180,6 +181,7 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
 {
     MsgDataAddUser_t *pMsgDataAddUser;
     MsgDataDelUser_t *pMsgDataDelUser;
+    MsgDataRenameUser_t *pMsgDataRenameUser;
 
     memset(pMsgPkt, 0, sizeof(MsgPkt_t));
     pMsgPkt->CCFlag = 1;
@@ -228,6 +230,20 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
             memcpy(pMsgDataDelUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
             memcpy(pMsgDataDelUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
             memcpy(pMsgDataDelUser->DelUserName, "user01", 7);
+            break;
+        case '5':
+#ifdef __ROOT_LOGIN
+            pMsgPkt->cmd = MSG_CMD_ROOT_RENAME_ADMIN;
+            pMsgDataRenameUser = (MsgDataRenameUser_t *)pMsgPkt->data;
+            pMsgDataRenameUser->VerifyData.UserID = LOGIN_USER_ID;
+            memcpy(pMsgDataRenameUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
+            memcpy(pMsgDataRenameUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
+            memcpy(pMsgDataRenameUser->OldUserName, "admin01", 7);
+            memcpy(pMsgDataRenameUser->NewUserName, "admin02", 7);
+#else
+            pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
+            printf("No root login\n");
+#endif
             break;
         case 'q':
             break;
@@ -309,4 +325,5 @@ void DispHelpInfo(void)
     printf("2: Del admin\n");
     printf("3: Add user\n");
     printf("4: Del user\n");
+    printf("5: Rename user\n");
 }

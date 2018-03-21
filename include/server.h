@@ -54,6 +54,7 @@ void *SERVER_ServerTask(void *pArg);
 G_STATUS SERVER_ROOT_AddAdmin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ROOT_UserLogin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ROOT_DelAdmin(MsgPkt_t *pMsgPkt);
+G_STATUS SERVER_ROOT_RenameAdmin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ADMIN_AddUser(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ADMIN_DelUser(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_daemonize(void);
