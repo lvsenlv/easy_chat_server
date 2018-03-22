@@ -205,11 +205,16 @@ void *SERVER_ServerTask(void *pArg)
                 continue;
             }
 
+            if(MSG_CMD_DO_NOTHING == MsgPkt.cmd)
+            {
+                pCurSession->status = SESSION_STATUS_ON_LINE;
+            }
+
             CurFd = pCurSession->fd;
             LOG_DEBUG("[SERVER task][%s] New message\n", pCurSession->ip);
             pthread_mutex_unlock(&g_SessionLock);
 
-            if(sizeof(MsgPkt_t) == ReadDataLength)
+            if((sizeof(MsgPkt_t) == ReadDataLength)  && (MSG_CMD_DO_NOTHING != MsgPkt.cmd))
             {
                 if(CurFd == MsgPkt.fd)
                 {
@@ -486,6 +491,48 @@ G_STATUS SERVER_ROOT_RenameAdmin(MsgPkt_t *pMsgPkt)
     return STAT_OK;
 }
 
+/*
+ *  @Briefs: Clear log
+ *  @Return: STAT_OK / STAT_ERR
+ *  @Note:   None
+ */
+G_STATUS SERVER_ROOT_ClearLog(MsgPkt_t *pMsgPkt)
+{
+    MsgDataVerifyIdentity_t *pVerifyData;
+    int i;
+    int fd;
+    int retry;
+
+    pVerifyData = (MsgDataVerifyIdentity_t *)pMsgPkt->data;
+    
+    if(STAT_OK != SERVER_ROOT_VerifyIdentity(pVerifyData))
+        return STAT_ERR;
+    
+    for(i = 0; i < LOG_LEVEL_MAX; i++)
+    {
+        pthread_mutex_lock(&g_LogLockTbl[i]);
+        
+        fd = fileno(g_LogFileTbl[i]);
+        for(retry = 1; retry <= 3; retry++)
+        {
+            if(0 == ftruncate(fd, 0))
+                break;
+        }
+        
+        if(3 == retry)
+        {
+            pthread_mutex_unlock(&g_LogLockTbl[i]);
+            return STAT_ERR;
+        }
+
+        lseek(fd, 0, SEEK_SET);
+        
+        pthread_mutex_unlock(&g_LogLockTbl[i]);
+    }
+
+    LOG_INFO("[SERVER clear log] success\n");
+    return STAT_OK;
+}
 //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 //Root level function
 
@@ -908,11 +955,8 @@ G_STATUS SERVER_CheckAllUserStatus(MsgPkt_t *pMsgPkt)
 {
     session_t *pPrevSession;
     session_t *pCurSession;
-    int WriteDataLength;
-    MsgPkt_t MsgPkt;
     _BOOL_ flag;
 
-    MSG_InitMsgPkt(&MsgPkt);
     flag = FALSE;
 
     pthread_mutex_lock(&g_SessionLock);
@@ -921,27 +965,19 @@ G_STATUS SERVER_CheckAllUserStatus(MsgPkt_t *pMsgPkt)
     
     while(NULL != pCurSession)
     {
-        if(0 > pCurSession->fd)
+        if(SESSION_STATUS_OFF_LINE == pCurSession->status)
         {
             flag = TRUE;
             SERVER_FreeSession(pPrevSession, pCurSession, FALSE);
+            LOG_DEBUG("[SERVER check status] %s is off line\n", pCurSession->ip);
             pCurSession = pPrevSession->pNext;
             continue;
         }
-        
-        WriteDataLength = write(pCurSession->fd, &MsgPkt, sizeof(MsgPkt_t));
-        if(sizeof(MsgPkt_t) != WriteDataLength)
-        {
-            flag = TRUE;
-            SERVER_FreeSession(pPrevSession, pCurSession, FALSE);
-            pCurSession = pPrevSession->pNext;
-        }
-        else
-        {
-            //LOG_DEBUG("[Status][%s][%s]: Online\n", pCurSession->UserInfo.UserName, pCurSession->ip);
-            pPrevSession = pCurSession;
-            pCurSession = pCurSession->pNext;
-        }
+    
+        LOG_DEBUG("[SERVER check status] %s is on line\n", pCurSession->ip);
+        pCurSession->status = SESSION_STATUS_OFF_LINE;
+        pPrevSession = pCurSession;
+        pCurSession = pCurSession->pNext;
     }
 
     if(TRUE == flag)
@@ -1310,6 +1346,7 @@ static G_STATUS SERVER_CreateSession(int fd, struct sockaddr_in *pClientSocketAd
     }
 
     pNewSession->fd = fd;
+    pNewSession->status = SESSION_STATUS_ON_LINE;
     memcpy(pNewSession->ip, inet_ntoa(pClientSocketAddr->sin_addr), IP_ADDR_MAX_LENGTH);
     pNewSession->pNext = NULL;
 

@@ -14,7 +14,7 @@
 #define LOG_PATH                            "/var/log/easy_chat"
 #define LOG_SYSLOG_FILE                     "/var/log/easy_chat_syslog"
 #define LOG_MONITOR_TIME_INTERVAL           10 //Unit: second
-#define LOG_FILE_MAX_SIZE                   (1024*10) //10Mb
+#define LOG_FILE_MAX_SIZE                   (1024*1024*10) //10Mb
 #ifdef __LOG_CLEAR
 #define LOG_OPEN_FORMAT                     "w+"
 #else

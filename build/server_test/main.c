@@ -50,6 +50,7 @@ int main(int argc, char **argv)
     int ClientSocketFd = 0;
     struct sockaddr_in ClientSocketAddr;
     int res;
+    fd_set ReadFds;
     int MaxFd = 0;
     char buf[BUF_SIZE] = {0};
     int SendDataLength;
@@ -58,6 +59,7 @@ int main(int argc, char **argv)
     MsgDataVerifyIdentity_t *pVerifyData;
     MsgDataRes_t *pResMsgData;
     int retry;
+    struct timeval tv;
     
     ClientSocketFd = socket(AF_INET, SOCK_STREAM, 0);
     if(0 > ClientSocketFd)
@@ -138,13 +140,40 @@ int main(int argc, char **argv)
     }
     
     printf("Success connect to server\n");
+    tv.tv_usec = 0;
     
     while(1)
     {
         while(1)
         {
-            fgets(buf, 2, stdin);
+            //fgets(buf, 2, stdin);
+            FD_ZERO(&ReadFds);
+            FD_SET(0, &ReadFds);
+            tv.tv_sec = 9;
             
+            res = select(1, &ReadFds, NULL, NULL,&tv);
+            if(-1 == res)
+            {
+                perror("select:");
+                return 0;
+            }
+
+            if(0 == res)
+            {
+                buf[0] = '0';
+            }
+            else
+            {
+                buf[0] = '\0';
+                if(FD_ISSET(0, &ReadFds))
+                {
+                    read(STDIN_FILENO, buf, sizeof(buf));
+                }
+                
+                if('\0' == buf[0])
+                    continue;
+            }
+
             if(STAT_OK != FillMsgPkt(&MsgPkt, buf[0]))
                 continue;
 
@@ -161,6 +190,9 @@ int main(int argc, char **argv)
 
             break;
         }
+
+        if(0 == res)
+            continue;
 
         if(STAT_OK != GetResponse(&ResMsgPkt, ClientSocketFd, 1))
         {
@@ -189,6 +221,9 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
     
     switch(choice)
     {
+        case '0':
+            pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
+            break;
         case '1':
 #ifdef __ROOT_LOGIN
             pMsgPkt->cmd = MSG_CMD_ROOT_ADD_ADMIN;
@@ -240,6 +275,18 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
             memcpy(pMsgDataRenameUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
             memcpy(pMsgDataRenameUser->OldUserName, "admin01", 7);
             memcpy(pMsgDataRenameUser->NewUserName, "admin02", 7);
+#else
+            pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
+            printf("No root login\n");
+#endif
+            break;
+        case '6':
+#ifdef __ROOT_LOGIN
+            pMsgPkt->cmd = MSG_CMD_ROOT_CLEAR_LOG;
+            pMsgDataAddUser = (MsgDataAddUser_t *)pMsgPkt->data;
+            pMsgDataAddUser->VerifyData.UserID = LOGIN_USER_ID;
+            memcpy(pMsgDataAddUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
+            memcpy(pMsgDataAddUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
 #else
             pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
             printf("No root login\n");
@@ -326,4 +373,5 @@ void DispHelpInfo(void)
     printf("3: Add user\n");
     printf("4: Del user\n");
     printf("5: Rename user\n");
+    printf("6: Clear log\n");
 }

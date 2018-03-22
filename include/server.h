@@ -30,9 +30,9 @@
 #define SERVER_GET_ACTUAL_USER_ID(id)       (id & (~((uint64_t)0x1 << 63)))
 
 typedef enum {
-    USER_STATUS_ON_LINE = 0,
-    USER_STATUS_OFF_LINE,
-}USER_STATUS;
+    SESSION_STATUS_ON_LINE = 1,
+    SESSION_STATUS_OFF_LINE,
+}SESSION_STATUS;
 
 typedef struct UserInfoStruct {
     uint64_t UserID;
@@ -41,6 +41,7 @@ typedef struct UserInfoStruct {
 
 typedef struct SessionStruct {
     int fd;
+    SESSION_STATUS status;
     char ip[IP_ADDR_MAX_LENGTH];
     UserInfo_t UserInfo;
     struct SessionStruct *pNext;
@@ -55,6 +56,7 @@ G_STATUS SERVER_ROOT_AddAdmin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ROOT_UserLogin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ROOT_DelAdmin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ROOT_RenameAdmin(MsgPkt_t *pMsgPkt);
+G_STATUS SERVER_ROOT_ClearLog(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ADMIN_AddUser(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ADMIN_DelUser(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_daemonize(void);

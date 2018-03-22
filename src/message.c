@@ -324,6 +324,7 @@ static G_STATUS MSG_InitGlobalVariables(void)
     g_pCmdDetail[MSG_CMD_ROOT_ADD_ADMIN]            = "add admin";
     g_pCmdDetail[MSG_CMD_ROOT_DEL_ADMIN]            = "del admin";
     g_pCmdDetail[MSG_CMD_ROOT_RENAME_ADMIN]         = "rename admin";
+    g_pCmdDetail[MSG_CMD_ROOT_CLEAR_LOG]            = "clear log";
     g_pCmdDetail[MSG_CMD_ADMIN_ADD_USER]            = "add user";
     g_pCmdDetail[MSG_CMD_ADMIN_DEL_USER]            = "del user";
     g_pCmdDetail[MSG_CMD_USER_LOGIN]                = "user login";
@@ -372,6 +373,9 @@ static G_STATUS MSG_ProcessMsg(MsgPkt_t *pMsgPkt)
             break;
         case MSG_CMD_ROOT_RENAME_ADMIN:
             SERVER_ROOT_RenameAdmin(pMsgPkt);
+            break;
+        case MSG_CMD_ROOT_CLEAR_LOG:
+            SERVER_ROOT_ClearLog(pMsgPkt);
             break;
 #endif
         default:
