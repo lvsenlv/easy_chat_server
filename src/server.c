@@ -256,6 +256,7 @@ void *SERVER_ServerTask(void *pArg)
 
 
 
+
 #define ROOT_LEVEL //Only use for locating function efficiently
 //Root level function
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -531,6 +532,16 @@ G_STATUS SERVER_ROOT_ClearLog(MsgPkt_t *pMsgPkt)
     }
 
     LOG_INFO("[SERVER clear log] success\n");
+    return STAT_OK;
+}
+
+/*
+ *  @Briefs: Download log file
+ *  @Return: STAT_OK / STAT_ERR
+ *  @Note:   None
+ */
+G_STATUS SERVER_ROOT_DownloadLog(MsgPkt_t *pMsgPkt)
+{
     return STAT_OK;
 }
 //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -1513,6 +1524,97 @@ static void SERVER_UpdateMaxFd(__IO int *pMaxFd)
 
     *pMaxFd = MaxFd;
     LOG_DEBUG("[Update MaxFd] MaxFd=%d\n", MaxFd);
+}
+
+static G_STATUS SERVER_TransferFile(const char *pFileName, int UserFd)
+{
+    stat_t FileInfo;
+    int fd;
+    char *pContent;
+    char *pCurPos;
+    int CycleCount;
+    int i;
+    int DataLength;
+    int LeftDataLength;
+
+    if(0 != GetFileInfo(pFileName, &FileInfo))
+    {
+        LOG_DEBUG("[SERVER transfer file] %s\n", strerror(errno));
+        return STAT_ERR;
+    }
+
+    if(SERVER_TRANSFER_FILE_MAX_SIZE < FileInfo.st_size)
+    {
+        LOG_DEBUG("[SERVER transfer file] File too big, actual size: %ld byte\n", FileInfo.st_size);
+        return STAT_ERR;
+    }
+
+    if(0 == FileInfo.st_size)
+    {
+        LOG_DEBUG("[SERVER transfer file] Empty file\n");
+        return STAT_ERR;
+    }
+    
+    fd = open(pFileName, O_RDONLY);
+    if(0 > fd)
+    {
+        LOG_DEBUG("[SERVER transfer file] open(): %s\n", strerror(errno));
+        return STAT_ERR;
+    }
+
+    pContent = (char *)malloc(FileInfo.st_size);
+    if(NULL == pContent)
+    {
+        close(fd);
+        LOG_DEBUG("[SERVER transfer file] malloc(): %s\n", strerror(errno));
+        return STAT_ERR;
+    }
+
+    pCurPos = pContent;
+    
+    DataLength = read(fd, pCurPos, FileInfo.st_size);
+    if(FileInfo.st_size != DataLength)
+    {
+        free(pContent);
+        close(fd);
+        LOG_DEBUG("[SERVER transfer file] read(): %s\n", strerror(errno));
+        return STAT_ERR;
+    }
+    
+    CycleCount = FileInfo.st_size / 4096;
+    
+    for(i = 0; i < CycleCount; i++)
+    {
+        DataLength = write(UserFd, pCurPos, 4096);
+        if(4096 != DataLength)
+        {
+            free(pContent);
+            close(fd);
+            LOG_DEBUG("[SERVER transfer file] write(): %s\n", strerror(errno));
+            return STAT_ERR;
+        }
+
+        pCurPos += 4096;
+    }
+
+    LeftDataLength = FileInfo.st_size % 4096;
+    if(0 != LeftDataLength)
+    {
+        DataLength = write(UserFd, pCurPos, LeftDataLength);
+        if(LeftDataLength != DataLength)
+        {
+            free(pContent);
+            close(fd);
+            LOG_DEBUG("[SERVER transfer file] write(): %s\n", strerror(errno));
+            return STAT_ERR;
+        }
+    }
+    
+    free(pContent);
+    close(fd);
+    LOG_DEBUG("[SERVER transfer file] success\n");
+    
+    return STAT_OK;
 }
 //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 //Static function

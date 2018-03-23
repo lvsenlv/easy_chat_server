@@ -56,10 +56,10 @@ G_STATUS LOG_InitLog(const char *LogPath)
 {
     if(STAT_OK != LOG_InitLogLock())
         return STAT_ERR;
-        
+    
     if(STAT_OK != LOG_InitLogFile(LogPath))
         return STAT_ERR;
-
+    
 #ifndef __LOG_CLEAR
     if(STAT_OK != LOG_CheckLogFileSize())
         return STAT_ERR;

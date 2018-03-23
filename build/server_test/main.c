@@ -25,7 +25,7 @@
 #define LOGIN_PASSWORD                      "admin123"
 #endif
 
-G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char ch);
+G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char ch, _BOOL_ *pFlag);
 G_STATUS GetResponse(MsgPkt_t *pMsgPkt, int fd, int timeout);
 void DispHelpInfo(void);
  
@@ -60,6 +60,7 @@ int main(int argc, char **argv)
     MsgDataRes_t *pResMsgData;
     int retry;
     struct timeval tv;
+    _BOOL_ flag;
     
     ClientSocketFd = socket(AF_INET, SOCK_STREAM, 0);
     if(0 > ClientSocketFd)
@@ -140,6 +141,7 @@ int main(int argc, char **argv)
     }
     
     printf("Success connect to server\n");
+    flag = FALSE;
     tv.tv_usec = 0;
     
     while(1)
@@ -174,7 +176,7 @@ int main(int argc, char **argv)
                     continue;
             }
 
-            if(STAT_OK != FillMsgPkt(&MsgPkt, buf[0]))
+            if(STAT_OK != FillMsgPkt(&MsgPkt, buf[0], &flag))
                 continue;
 
             SendDataLength = write(ClientSocketFd, &MsgPkt, sizeof(MsgPkt_t));
@@ -194,6 +196,9 @@ int main(int argc, char **argv)
         if(0 == res)
             continue;
 
+        if(TRUE != flag)
+            continue;
+        
         if(STAT_OK != GetResponse(&ResMsgPkt, ClientSocketFd, 1))
         {
             printf("Server no response\n");
@@ -209,7 +214,7 @@ int main(int argc, char **argv)
     return 0;
 }
 
-G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
+G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice, _BOOL_ *pFlag)
 {
     MsgDataAddUser_t *pMsgDataAddUser;
     MsgDataDelUser_t *pMsgDataDelUser;
@@ -218,6 +223,7 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
     memset(pMsgPkt, 0, sizeof(MsgPkt_t));
     pMsgPkt->CCFlag = 1;
     pMsgPkt->fd = g_ResFd;
+    *pFlag = FALSE;
     
     switch(choice)
     {
@@ -226,6 +232,7 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
             break;
         case '1':
 #ifdef __ROOT_LOGIN
+            *pFlag = TRUE;
             pMsgPkt->cmd = MSG_CMD_ROOT_ADD_ADMIN;
             pMsgDataAddUser = (MsgDataAddUser_t *)pMsgPkt->data;
             pMsgDataAddUser->VerifyData.UserID = LOGIN_USER_ID;
@@ -240,6 +247,7 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
             break;
         case '2':
 #ifdef __ROOT_LOGIN
+            *pFlag = TRUE;
             pMsgPkt->cmd = MSG_CMD_ROOT_DEL_ADMIN;
             pMsgDataDelUser = (MsgDataDelUser_t *)pMsgPkt->data;
             pMsgDataDelUser->VerifyData.UserID = LOGIN_USER_ID;
@@ -252,6 +260,7 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
 #endif
             break;
         case '3':
+            *pFlag = TRUE;
             pMsgPkt->cmd = MSG_CMD_ADMIN_ADD_USER;
             pMsgDataAddUser = (MsgDataAddUser_t *)pMsgPkt->data;
             memcpy(pMsgDataAddUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
@@ -260,6 +269,7 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
             memcpy(pMsgDataAddUser->AddPassword, "user123", 7);
             break;
         case '4':
+            *pFlag = TRUE;
             pMsgPkt->cmd = MSG_CMD_ADMIN_DEL_USER;
             pMsgDataDelUser = (MsgDataDelUser_t *)pMsgPkt->data;
             memcpy(pMsgDataDelUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
@@ -268,6 +278,7 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
             break;
         case '5':
 #ifdef __ROOT_LOGIN
+            *pFlag = TRUE;
             pMsgPkt->cmd = MSG_CMD_ROOT_RENAME_ADMIN;
             pMsgDataRenameUser = (MsgDataRenameUser_t *)pMsgPkt->data;
             pMsgDataRenameUser->VerifyData.UserID = LOGIN_USER_ID;
@@ -283,6 +294,30 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice)
         case '6':
 #ifdef __ROOT_LOGIN
             pMsgPkt->cmd = MSG_CMD_ROOT_CLEAR_LOG;
+            pMsgDataAddUser = (MsgDataAddUser_t *)pMsgPkt->data;
+            pMsgDataAddUser->VerifyData.UserID = LOGIN_USER_ID;
+            memcpy(pMsgDataAddUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
+            memcpy(pMsgDataAddUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
+#else
+            pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
+            printf("No root login\n");
+#endif
+            break;
+        case '7':
+#ifdef __ROOT_LOGIN
+            pMsgPkt->cmd = MSG_CMD_ROOT_RESTART_SERVER_TASK;
+            pMsgDataAddUser = (MsgDataAddUser_t *)pMsgPkt->data;
+            pMsgDataAddUser->VerifyData.UserID = LOGIN_USER_ID;
+            memcpy(pMsgDataAddUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
+            memcpy(pMsgDataAddUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
+#else
+            pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
+            printf("No root login\n");
+#endif
+            break;
+        case '8':
+#ifdef __ROOT_LOGIN
+            pMsgPkt->cmd = MSG_CMD_ROOT_RESTART_MSG_TASK;
             pMsgDataAddUser = (MsgDataAddUser_t *)pMsgPkt->data;
             pMsgDataAddUser->VerifyData.UserID = LOGIN_USER_ID;
             memcpy(pMsgDataAddUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
@@ -374,4 +409,6 @@ void DispHelpInfo(void)
     printf("4: Del user\n");
     printf("5: Rename user\n");
     printf("6: Clear log\n");
+    printf("7: Restart server task\n");
+    printf("8: Restart msg task\n");
 }

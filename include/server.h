@@ -26,6 +26,7 @@
 #define USER_MAX_NUM                        512
 #define SERVER_SELECT_TIME_INTERVAL         5 //Unit: second
 #define SERVER_CHECK_USER_STATUS_INTERVAL   10
+#define SERVER_TRANSFER_FILE_MAX_SIZE       (1024*1024*1024) //1Gb
 
 #define SERVER_GET_ACTUAL_USER_ID(id)       (id & (~((uint64_t)0x1 << 63)))
 
