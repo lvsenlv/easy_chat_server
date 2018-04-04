@@ -13,6 +13,7 @@
 
 #define SERVER_ROOT_DIR                     "/root/.easy_chat"
 #define SERVER_IDENTITY_FILE_NAME           "identity.info"
+#define SERVER_TRANSFER_QUEUE               "/var/easy_chat_transfer_queue"
 
 /*
     If the time of twice restarting less than this value,
@@ -26,7 +27,6 @@
 #define USER_MAX_NUM                        512
 #define SERVER_SELECT_TIME_INTERVAL         5 //Unit: second
 #define SERVER_CHECK_USER_STATUS_INTERVAL   10
-#define SERVER_TRANSFER_FILE_MAX_SIZE       (1024*1024*1024) //1Gb
 
 #define SERVER_GET_ACTUAL_USER_ID(id)       (id & (~((uint64_t)0x1 << 63)))
 
@@ -58,6 +58,7 @@ G_STATUS SERVER_ROOT_UserLogin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ROOT_DelAdmin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ROOT_RenameAdmin(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ROOT_ClearLog(MsgPkt_t *pMsgPkt);
+G_STATUS SERVER_ROOT_DownloadLog(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ADMIN_AddUser(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_ADMIN_DelUser(MsgPkt_t *pMsgPkt);
 G_STATUS SERVER_daemonize(void);

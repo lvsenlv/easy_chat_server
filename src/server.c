@@ -8,6 +8,7 @@
 #include "server.h"
 #include "log.h"
 #include "completion_code.h"
+#include "crc.h"
 #include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -35,9 +36,11 @@ static COMPLETION_CODE SERVER_RenameUser(const char *pOldUserName,
 static void SERVER_GetSession(session_t **ppPrevSession, session_t **ppCurSession, int fd, uint64_t UserID);
 static void SERVER_FreeSession(session_t *pPrevSession , session_t *pCurSession, _BOOL_ flag);
 static void SERVER_UpdateMaxFd(__IO int *pMaxFd);
+static G_STATUS SERVER_TransferFile(const char *pFileName, int UserFd);
 
 volatile char g_ServerLiveFlag;         //1 mean server task is alive
 int g_ServerSocketFd;                   //It would be initialized in server task
+int g_ServerTransferFd;
 
 /*
     Mutex lock sequence:
@@ -252,6 +255,57 @@ void *SERVER_ServerTask(void *pArg)
     return NULL;
 }
 
+void *SERVER_TransferTask(void *pArg)
+{
+    fd_set fds;
+    struct timeval TimeInterval;
+    int res;
+    int ReadDataLength;
+    char buf[FILE_NAME_MAX_LENGTH + 32];
+    int UserFd;
+
+    TimeInterval.tv_usec = 0;
+
+    while(1)
+    {
+        FD_ZERO(&fds);
+        FD_SET(g_ServerTransferFd, &fds);
+        TimeInterval.tv_sec = 10;
+        
+        res = select(g_ServerTransferFd+1, &fds, NULL, NULL, &TimeInterval);
+        if(0 > res)
+        {
+            LOG_ERROR("[SERVER transfer task] Select function return negative value\n");
+            continue;
+        }
+
+        if(0 == res)
+            continue;
+
+        if(!(FD_ISSET(g_ServerTransferFd, &fds)))
+            continue;
+
+        ReadDataLength = read(g_ServerTransferFd, buf, sizeof(buf));
+        if(0 >= ReadDataLength)
+        {
+            LOG_ERROR("[SERVER transfer task] read(): %s\n", strerror(errno));
+            continue;
+        }
+
+        buf[sizeof(buf)-1] = '\0';
+
+        UserFd = *((int *)buf);
+        if(0 > UserFd)
+        {
+            LOG_WARNING("[SERVER transfer task] Invalid fd: %d\n", UserFd);
+            continue;
+        }
+
+        SERVER_TransferFile(buf+32, UserFd);
+    }
+
+    return NULL;
+}
 
 
 
@@ -542,6 +596,28 @@ G_STATUS SERVER_ROOT_ClearLog(MsgPkt_t *pMsgPkt)
  */
 G_STATUS SERVER_ROOT_DownloadLog(MsgPkt_t *pMsgPkt)
 {
+    MsgDataTransferFile_t *pReqMsgData;
+    char FileName[FILE_NAME_MAX_LENGTH+128];
+
+    pReqMsgData = (MsgDataTransferFile_t *)pMsgPkt->data;
+    
+    if(STAT_OK != SERVER_ROOT_VerifyIdentity(&pReqMsgData->VerifyData))
+        return STAT_ERR;
+
+    //snprintf(FileName, sizeof(FileName), "%s/%s", LOG_PATH, pReqMsgData->FileName);
+    snprintf(FileName, sizeof(FileName), "/root/%s", pReqMsgData->FileName);
+
+    if(0 != access(FileName, F_OK))
+    {
+        LOG_DEBUG("[SERVER download log] No such file: %s\n", FileName);
+        return STAT_ERR;
+    }
+
+    if(STAT_OK != SERVER_TransferFile(FileName, pMsgPkt->fd))
+        return STAT_ERR;
+
+    LOG_DEBUG("[SERVER download log] Success\n");
+    
     return STAT_OK;
 }
 //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -845,6 +921,28 @@ G_STATUS SERVER_BeforeCreateTask(void)
     if(STAT_OK != SERVER_InitGlobalVaribles())
         return STAT_ERR;
 
+    if(0 == access(SERVER_TRANSFER_QUEUE, F_OK))
+    {
+        if(0 != unlink(SERVER_TRANSFER_QUEUE))
+        {
+            LOG_FATAL_ERROR("[SERVER create queue] unlink(): %s", strerror(errno));
+            return STAT_FATAL_ERR;
+        }
+    }
+    
+    if(0 != mkfifo(SERVER_TRANSFER_QUEUE, 0600))
+    {
+        LOG_FATAL_ERROR("[SERVER create queue] mkfifo(): %s", strerror(errno));
+        return STAT_FATAL_ERR;
+    }
+    
+    g_ServerTransferFd = open(SERVER_TRANSFER_QUEUE, O_RDWR);
+    if(0 > g_ServerTransferFd)
+    {
+        LOG_FATAL_ERROR("[SERVER create queue] open(): %s", strerror(errno));
+        return STAT_FATAL_ERR;
+    }
+
     return STAT_OK;
 }
 
@@ -1040,6 +1138,7 @@ static G_STATUS SERVER_InitGlobalVaribles(void)
 {
     g_ServerLiveFlag = 0;
     g_ServerSocketFd = 0;
+    g_ServerTransferFd = 0;
     g_pTailSession = &g_HeadSession;
     memset(&g_HeadSession, 0, sizeof(session_t));
     
@@ -1526,29 +1625,42 @@ static void SERVER_UpdateMaxFd(__IO int *pMaxFd)
     LOG_DEBUG("[Update MaxFd] MaxFd=%d\n", MaxFd);
 }
 
+/*
+ *  @Briefs: Transfer file to client
+ *  @Return: None
+ *  @Note:   
+ *           Protocol:
+ *           1. Send start cmd
+ *           2. Send data. The data size is saved in fd parameter in MsgPkt. - CRC32
+ *           3. Send finish cmd
+ */
 static G_STATUS SERVER_TransferFile(const char *pFileName, int UserFd)
 {
     stat_t FileInfo;
     int fd;
-    char *pContent;
-    char *pCurPos;
+    char buf[MSG_TRANSFER_DATA_BASE_SIZE+sizeof(MsgTransferPkt_t)];
+    MsgTransferPkt_t *pMsgTransferPkt;
+    char *pData;
+    int DataLength;
     int CycleCount;
     int i;
-    int DataLength;
-    int LeftDataLength;
+    int RemainderDataLength;
+
+    pMsgTransferPkt = (MsgTransferPkt_t *)buf;
+    pData = buf + sizeof(MsgTransferPkt_t);
 
     if(0 != GetFileInfo(pFileName, &FileInfo))
     {
         LOG_DEBUG("[SERVER transfer file] %s\n", strerror(errno));
         return STAT_ERR;
     }
-
-    if(SERVER_TRANSFER_FILE_MAX_SIZE < FileInfo.st_size)
+    
+    if(MSG_TRANSFER_DATA_MAX_SIZE < FileInfo.st_size)
     {
         LOG_DEBUG("[SERVER transfer file] File too big, actual size: %ld byte\n", FileInfo.st_size);
         return STAT_ERR;
     }
-
+    
     if(0 == FileInfo.st_size)
     {
         LOG_DEBUG("[SERVER transfer file] Empty file\n");
@@ -1561,57 +1673,79 @@ static G_STATUS SERVER_TransferFile(const char *pFileName, int UserFd)
         LOG_DEBUG("[SERVER transfer file] open(): %s\n", strerror(errno));
         return STAT_ERR;
     }
+    
+    pMsgTransferPkt->cmd = MSG_TRANSFER_START;
+    pMsgTransferPkt->size = FileInfo.st_size;
+    pMsgTransferPkt->CheckCode = CRC16_calculate(&pMsgTransferPkt->size, sizeof(pMsgTransferPkt->size));
 
-    pContent = (char *)malloc(FileInfo.st_size);
-    if(NULL == pContent)
+    DataLength = write(UserFd, pMsgTransferPkt, sizeof(MsgTransferPkt_t));
+    if(sizeof(MsgTransferPkt_t) != DataLength)
     {
         close(fd);
-        LOG_DEBUG("[SERVER transfer file] malloc(): %s\n", strerror(errno));
+        LOG_DEBUG("[SERVER transfer file] write(): %s\n", strerror(errno));
         return STAT_ERR;
     }
 
-    pCurPos = pContent;
-    
-    DataLength = read(fd, pCurPos, FileInfo.st_size);
-    if(FileInfo.st_size != DataLength)
-    {
-        free(pContent);
-        close(fd);
-        LOG_DEBUG("[SERVER transfer file] read(): %s\n", strerror(errno));
-        return STAT_ERR;
-    }
-    
-    CycleCount = FileInfo.st_size / 4096;
-    
+    CycleCount = FileInfo.st_size / MSG_TRANSFER_DATA_BASE_SIZE;
+    pMsgTransferPkt->cmd = MSG_TRANSFER_DATA;
+    pMsgTransferPkt->size = MSG_TRANSFER_DATA_BASE_SIZE;
+
     for(i = 0; i < CycleCount; i++)
-    {
-        DataLength = write(UserFd, pCurPos, 4096);
-        if(4096 != DataLength)
+    {        
+        DataLength = read(fd, pData, MSG_TRANSFER_DATA_BASE_SIZE);
+        if(MSG_TRANSFER_DATA_BASE_SIZE != DataLength)
         {
-            free(pContent);
+            close(fd);
+            LOG_DEBUG("[SERVER transfer file] read(): %s\n", strerror(errno));
+            return STAT_ERR;
+        }
+
+        pMsgTransferPkt->CheckCode = CRC32_calculate(pData, MSG_TRANSFER_DATA_BASE_SIZE);
+        
+        DataLength = write(UserFd, buf, sizeof(buf));
+        if(sizeof(buf) != DataLength)
+        {
             close(fd);
             LOG_DEBUG("[SERVER transfer file] write(): %s\n", strerror(errno));
             return STAT_ERR;
         }
 
-        pCurPos += 4096;
+        //LOG_DEBUG("[SERVER transfer file] Tranfering .....\n");
     }
 
-    LeftDataLength = FileInfo.st_size % 4096;
-    if(0 != LeftDataLength)
+    RemainderDataLength = FileInfo.st_size % MSG_TRANSFER_DATA_BASE_SIZE;
+    if(0 != RemainderDataLength)
     {
-        DataLength = write(UserFd, pCurPos, LeftDataLength);
-        if(LeftDataLength != DataLength)
+        DataLength = read(fd, pData, RemainderDataLength);
+        if(RemainderDataLength != DataLength)
         {
-            free(pContent);
+            close(fd);
+            LOG_DEBUG("[SERVER transfer file] read(): %s\n", strerror(errno));
+            return STAT_ERR;
+        }
+
+        pMsgTransferPkt->size = RemainderDataLength;
+        pMsgTransferPkt->CheckCode = CRC32_calculate(pData, RemainderDataLength);
+    
+        DataLength = write(UserFd, buf, sizeof(MsgTransferPkt_t)+RemainderDataLength);
+        if((sizeof(MsgTransferPkt_t)+RemainderDataLength) != DataLength)
+        {
             close(fd);
             LOG_DEBUG("[SERVER transfer file] write(): %s\n", strerror(errno));
             return STAT_ERR;
         }
     }
     
-    free(pContent);
     close(fd);
+    
+    pMsgTransferPkt->cmd = MSG_TRANSFER_END;
+    DataLength = write(UserFd, pMsgTransferPkt, sizeof(MsgTransferPkt_t));
+    if(sizeof(MsgTransferPkt_t) != DataLength)
+    {
+        LOG_DEBUG("[SERVER transfer file] write(): %s\n", strerror(errno));
+        return STAT_ERR;
+    }
+    
     LOG_DEBUG("[SERVER transfer file] success\n");
     
     return STAT_OK;

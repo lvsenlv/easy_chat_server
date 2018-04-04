@@ -11,10 +11,8 @@
 #include "common.h"
 #include "completion_code.h"
 
-#define MSG_QUEUE_NAME                      "/var/MsgHandleQueue"
+#define MSG_QUEUE_NAME                      "/var/easy_char_msg_queue"
 #define HANDSHAKE_SYMBOL                    '#'
-#define SUCCESS_SYMBOL                      'Y'
-#define FAIL_SYMBOL                         'N'
 
 /*
     If the time of twice restarting less than this value,
@@ -29,8 +27,11 @@
 #define MSG_MAX_NUM                         1024
 #define MSG_DATA_MAX_LENGTH                 1024
 #define MSG_RESERVE_DATA_MAX_LENGTH         64
+#define MSG_TRANSFER_DATA_BASE_SIZE         (1024*4) //4Kb
+#define MSG_TRANSFER_DATA_MAX_SIZE          ((uint64_t)1024*1024*1024*4) //4Gb
 
 typedef enum {
+    //To server
     MSG_CMD_SEND_TO_USER = 1,
     MSG_CMD_SEND_RES,
     MSG_CMD_ROOT_LOGIN,
@@ -38,6 +39,7 @@ typedef enum {
     MSG_CMD_ROOT_DEL_ADMIN,
     MSG_CMD_ROOT_RENAME_ADMIN,
     MSG_CMD_ROOT_CLEAR_LOG,
+    MSG_CMD_ROOT_DOWNLOAD_LOG,
     MSG_CMD_ADMIN_ADD_USER,
     MSG_CMD_ADMIN_DEL_USER,
     MSG_CMD_USER_LOGIN,
@@ -47,13 +49,25 @@ typedef enum {
     MSG_CMD_MAX,
 }MSG_CMD;
 
+typedef enum {
+    MSG_TRANSFER_START = MSG_CMD_MAX + 1,
+    MSG_TRANSFER_DATA,
+    MSG_TRANSFER_END,
+}MSG_TRANSFER_CMD;
+
 typedef struct MsgPktStruct {
     MSG_CMD cmd;
     int fd;
     char data[MSG_DATA_MAX_LENGTH];
     char CCFlag; //1 means it need to send a response message
-    int CheckSum;
+    uint32_t CheckCode;
 }ALIGN_4K MsgPkt_t;
+
+typedef struct MsgTransferPktStruct {
+    MSG_TRANSFER_CMD cmd;
+    uint64_t size;
+    uint32_t CheckCode;
+}MsgTransferPkt_t;
 
 typedef struct MsgDataVerifyIdentityStruct {
     uint64_t UserID;
@@ -82,6 +96,11 @@ typedef struct MsgDataRenameUserStruct {
     char OldUserName[USER_NAME_MAX_LENGTH];
     char NewUserName[USER_NAME_MAX_LENGTH];
 }MsgDataRenameUser_t;
+
+typedef struct MsgDataTransferFileStruct {
+    MsgDataVerifyIdentity_t VerifyData;
+    char FileName[FILE_NAME_MAX_LENGTH];
+}MsgDataTransferFile_t;
 
 extern char g_MsgTaskLiveFlag;
 extern char *g_pCmdDetail[MSG_CMD_MAX];

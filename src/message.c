@@ -11,6 +11,7 @@
 #include "message.h"
 #endif
 #include "log.h"
+#include "crc.h"
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -93,7 +94,7 @@ void *MSG_MessageTask(void *pArg)
         res = select(g_MsgQueue+1, &ReadFds, NULL, NULL, &TimeInterval);
         if(0 > res)
         {
-            LOG_WARNING("[Msg task] Select function return negative value\n");
+            LOG_ERROR("[Msg task] Select function return negative value\n");
             continue;
         }
         else if(0 == res)
@@ -105,7 +106,7 @@ void *MSG_MessageTask(void *pArg)
         ReadDataLength = read(g_MsgQueue, &MsgPkt, sizeof(MsgPkt_t));
         if(sizeof(MsgPkt_t) != ReadDataLength)
         {
-            LOG_WARNING("[Msg task] read(): %s\n", strerror(errno));
+            LOG_ERROR("[Msg task] read(): %s\n", strerror(errno));
             continue;
         }
 
@@ -130,6 +131,18 @@ G_STATUS MSG_BeforeCreateTask(void)
     if(STAT_OK != MSG_CreateMsgQueue())
         return STAT_ERR;
 
+#ifdef __CRC8
+    CRC8_InitTable();
+#endif
+
+#ifdef __CRC16
+    CRC16_InitTable();
+#endif
+
+#ifdef __CRC32
+    CRC32_InitTable();
+#endif
+
     return STAT_OK;
 }
 
@@ -139,7 +152,7 @@ void MSG_InitMsgPkt(MsgPkt_t *pMsgPkt)
     pMsgPkt->fd = -1;
     memset(pMsgPkt->data, 0, sizeof(pMsgPkt->data));
     pMsgPkt->CCFlag = 0;
-    pMsgPkt->CheckSum = 0;
+    pMsgPkt->CheckCode = 0;
 }
 
 G_STATUS MSG_LockMsgQueue(int fd)
@@ -285,7 +298,6 @@ static G_STATUS MSG_CreateMsgQueue(void)
         if(0 != unlink(MSG_QUEUE_NAME))
         {
             LOG_FATAL_ERROR("[MSG create queue] unlink(): %s", strerror(errno));
-                
             return STAT_FATAL_ERR;
         }
     }
@@ -325,6 +337,7 @@ static G_STATUS MSG_InitGlobalVariables(void)
     g_pCmdDetail[MSG_CMD_ROOT_DEL_ADMIN]            = "del admin";
     g_pCmdDetail[MSG_CMD_ROOT_RENAME_ADMIN]         = "rename admin";
     g_pCmdDetail[MSG_CMD_ROOT_CLEAR_LOG]            = "clear log";
+    g_pCmdDetail[MSG_CMD_ROOT_DOWNLOAD_LOG]         = "download log";
     g_pCmdDetail[MSG_CMD_ADMIN_ADD_USER]            = "add user";
     g_pCmdDetail[MSG_CMD_ADMIN_DEL_USER]            = "del user";
     g_pCmdDetail[MSG_CMD_USER_LOGIN]                = "user login";
@@ -376,6 +389,9 @@ static G_STATUS MSG_ProcessMsg(MsgPkt_t *pMsgPkt)
             break;
         case MSG_CMD_ROOT_CLEAR_LOG:
             SERVER_ROOT_ClearLog(pMsgPkt);
+            break;
+        case MSG_CMD_ROOT_DOWNLOAD_LOG:
+            SERVER_ROOT_DownloadLog(pMsgPkt);
             break;
 #endif
         default:

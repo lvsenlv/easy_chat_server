@@ -7,6 +7,7 @@
 
 #include "message.h"
 #include "completion_code.h"
+#include "crc.h"
 #include <errno.h>
 #include <sys/socket.h>
 #include <string.h>
@@ -14,6 +15,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
+#include <fcntl.h>
 
 #define __ROOT_LOGIN
 #ifdef __ROOT_LOGIN
@@ -28,6 +30,7 @@
 G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char ch, _BOOL_ *pFlag);
 G_STATUS GetResponse(MsgPkt_t *pMsgPkt, int fd, int timeout);
 void DispHelpInfo(void);
+G_STATUS GetFileFromServer(MsgPkt_t *pMsgPkt, int fd, int timeout);
  
 int g_ResFd;
  
@@ -46,6 +49,8 @@ int main(int argc, char **argv)
     }
 
     InitErrorCodeTable();
+    CRC32_InitTable();
+    CRC16_InitTable();
 
     int ClientSocketFd = 0;
     struct sockaddr_in ClientSocketAddr;
@@ -175,6 +180,8 @@ int main(int argc, char **argv)
                 if('\0' == buf[0])
                     continue;
             }
+//            buf[0] = '7';
+//            res = 1;
 
             if(STAT_OK != FillMsgPkt(&MsgPkt, buf[0], &flag))
                 continue;
@@ -192,19 +199,25 @@ int main(int argc, char **argv)
 
             break;
         }
+        
+        if(MSG_CMD_ROOT_DOWNLOAD_LOG == MsgPkt.cmd)
+        {
+            GetFileFromServer(NULL, ClientSocketFd, 3);
+            continue;
+        }
 
         if(0 == res)
             continue;
 
         if(TRUE != flag)
             continue;
-        
+
         if(STAT_OK != GetResponse(&ResMsgPkt, ClientSocketFd, 1))
         {
             printf("Server no response\n");
             continue;
         }
-            
+        
         if(CC_NORMAL != pResMsgData->CC)
             printf("%s\n", GetErrorDetails(pResMsgData->CC));
         else
@@ -219,6 +232,7 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice, _BOOL_ *pFlag)
     MsgDataAddUser_t *pMsgDataAddUser;
     MsgDataDelUser_t *pMsgDataDelUser;
     MsgDataRenameUser_t *pMsgDataRenameUser;
+    MsgDataTransferFile_t *pMsgDataTransferFile;
 
     memset(pMsgPkt, 0, sizeof(MsgPkt_t));
     pMsgPkt->CCFlag = 1;
@@ -275,6 +289,7 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice, _BOOL_ *pFlag)
             memcpy(pMsgDataDelUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
             memcpy(pMsgDataDelUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
             memcpy(pMsgDataDelUser->DelUserName, "user01", 7);
+            
             break;
         case '5':
 #ifdef __ROOT_LOGIN
@@ -305,23 +320,12 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice, _BOOL_ *pFlag)
             break;
         case '7':
 #ifdef __ROOT_LOGIN
-            pMsgPkt->cmd = MSG_CMD_ROOT_RESTART_SERVER_TASK;
-            pMsgDataAddUser = (MsgDataAddUser_t *)pMsgPkt->data;
-            pMsgDataAddUser->VerifyData.UserID = LOGIN_USER_ID;
-            memcpy(pMsgDataAddUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
-            memcpy(pMsgDataAddUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
-#else
-            pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
-            printf("No root login\n");
-#endif
-            break;
-        case '8':
-#ifdef __ROOT_LOGIN
-            pMsgPkt->cmd = MSG_CMD_ROOT_RESTART_MSG_TASK;
-            pMsgDataAddUser = (MsgDataAddUser_t *)pMsgPkt->data;
-            pMsgDataAddUser->VerifyData.UserID = LOGIN_USER_ID;
-            memcpy(pMsgDataAddUser->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
-            memcpy(pMsgDataAddUser->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
+            pMsgPkt->cmd = MSG_CMD_ROOT_DOWNLOAD_LOG;
+            pMsgDataTransferFile = (MsgDataTransferFile_t *)pMsgPkt->data;
+            pMsgDataTransferFile->VerifyData.UserID = LOGIN_USER_ID;
+            memcpy(pMsgDataTransferFile->VerifyData.UserName, LOGIN_USER_NAME, sizeof(LOGIN_USER_NAME)-1);
+            memcpy(pMsgDataTransferFile->VerifyData.password, LOGIN_PASSWORD, sizeof(LOGIN_PASSWORD)-1);
+            memcpy(pMsgDataTransferFile->FileName, "info.log", 10);
 #else
             pMsgPkt->cmd = MSG_CMD_DO_NOTHING;
             printf("No root login\n");
@@ -339,6 +343,17 @@ G_STATUS FillMsgPkt(MsgPkt_t *pMsgPkt, char choice, _BOOL_ *pFlag)
 
     return STAT_OK;
 }
+
+void DispHelpInfo(void)
+{
+    printf("1: Add admin\n");
+    printf("2: Del admin\n");
+    printf("3: Add user\n");
+    printf("4: Del user\n");
+    printf("5: Rename user\n");
+    printf("6: Clear log\n");
+    printf("7: Download log\n");
+}
 
 G_STATUS GetResponse(MsgPkt_t *pMsgPkt, int fd, int timeout)
 {
@@ -401,14 +416,127 @@ G_STATUS GetResponse(MsgPkt_t *pMsgPkt, int fd, int timeout)
     return STAT_OK;
 }
 
-void DispHelpInfo(void)
+G_STATUS GetFileFromServer(MsgPkt_t *pMsgPkt, int fd, int timeout)
 {
-    printf("1: Add admin\n");
-    printf("2: Del admin\n");
-    printf("3: Add user\n");
-    printf("4: Del user\n");
-    printf("5: Rename user\n");
-    printf("6: Clear log\n");
-    printf("7: Restart server task\n");
-    printf("8: Restart msg task\n");
+    if(0 > timeout)
+        return STAT_ERR;
+
+    if(0 > fd)
+        return STAT_ERR;
+    
+    struct timeval TimeInterval;
+    fd_set fds;
+    int res;
+    int ReadDataLength;
+    char buf[1024*1024+sizeof(MsgTransferPkt_t)];
+    MsgTransferPkt_t *pMsgTransferPkt;
+    char NewFileFd;
+    uint32_t crc;
+
+    TimeInterval.tv_usec = 0;
+    pMsgTransferPkt = (MsgTransferPkt_t *)buf;
+    
+    NewFileFd = open("file.tmp", O_CREAT | O_RDWR, 0666);
+    if(0 > NewFileFd)
+        return STAT_ERR;
+
+    while(1)
+    {
+        FD_ZERO(&fds);
+        FD_SET(fd, &fds);
+        TimeInterval.tv_sec = timeout;
+
+        res = select(fd+1, &fds, NULL, NULL, &TimeInterval);
+        if(0 > res)
+        {
+            printf("[Get file] Select function return a negative value\n");
+            return STAT_ERR;
+        }
+
+        if(0 == res)
+            break;
+        
+        if(!(FD_ISSET(fd, &fds)))
+            return STAT_ERR;
+
+        ReadDataLength = read(fd, buf, sizeof(MsgTransferPkt_t));
+        if(0 >= ReadDataLength)
+        {
+            printf("[Get file] Invalid data length in msg queque, actual length: %d\n", ReadDataLength);
+            return STAT_ERR;
+        }
+
+        printf("ReadDataLength=%d\n, cmd=%d\n", ReadDataLength, pMsgTransferPkt->cmd);
+
+        if(MSG_TRANSFER_END == pMsgTransferPkt->cmd)
+            break;
+
+        if(MSG_TRANSFER_START == pMsgTransferPkt->cmd)
+        {
+            crc = CRC16_calculate(&pMsgTransferPkt->size, sizeof(pMsgTransferPkt->size));
+            if(crc != pMsgTransferPkt->CheckCode)
+            {
+                res = -1;
+                printf("CRC verify error, crc=0x%x, crc=0x%x\n", crc, pMsgTransferPkt->CheckCode);
+                printf("size=%ld\n", pMsgTransferPkt->size);
+                break;
+            }
+
+            printf("CRC verify success, start to recieve file ......\n");
+            continue;
+        }
+
+        if(MSG_TRANSFER_DATA != pMsgTransferPkt->cmd)
+        {
+            res = -1;
+            printf("Unknown error");
+            break;
+        }
+
+        FD_ZERO(&fds);
+        FD_SET(fd, &fds);
+        TimeInterval.tv_sec = timeout;
+
+        res = select(fd+1, &fds, NULL, NULL, &TimeInterval);
+        if(0 > res)
+        {
+            printf("[Get file] Select function return a negative value\n");
+            return STAT_ERR;
+        }
+        
+        if(0 > res)
+        {
+            printf("[Get file] Select function return a negative value\n");
+            return STAT_ERR;
+        }
+
+        if(0 == res)
+            break;
+        
+        if(!(FD_ISSET(fd, &fds)))
+            return STAT_ERR;
+
+        ReadDataLength = read(fd, buf+sizeof(MsgTransferPkt_t), pMsgTransferPkt->size);
+        if(0 >= ReadDataLength)
+        {
+            printf("[Get file] Invalid data length in msg queque, actual length: %d\n", ReadDataLength);
+            return STAT_ERR;
+        }
+        
+        printf("ReadDataLength=%d\n", ReadDataLength);
+
+        crc = CRC32_calculate(buf+sizeof(MsgTransferPkt_t), pMsgTransferPkt->size);
+        if(crc != pMsgTransferPkt->CheckCode)
+        {
+            res = -1;
+            printf("CRC verify error, crc=0x%x, crc=0x%x\n", crc, pMsgTransferPkt->CheckCode);
+            break;
+        }
+
+        write(NewFileFd, buf+sizeof(MsgTransferPkt_t), pMsgTransferPkt->size);
+    }
+
+    close(NewFileFd);
+    
+    return STAT_OK;
 }

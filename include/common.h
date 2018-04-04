@@ -22,6 +22,7 @@
 #define     USER_NAME_MAX_LENGTH                16      //Count in '\0'
 #define     PASSWORD_MAX_LENGTH                 16      //Count in '\0'
 #define     PASSWORD_MIN_LENGTH                 6
+#define     FILE_NAME_MAX_LENGTH                256
 
 //#include <stdint.h>
 //typedef     char                                int8_t;
